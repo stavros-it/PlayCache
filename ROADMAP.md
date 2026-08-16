@@ -232,6 +232,23 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-08-16 — Fix CI: cross-platform test compatibility
+The GitHub Actions CI workflow runs on Ubuntu, but two tests were
+Windows-specific and failed on Linux:
+
+1. **`test_stats_distributions`** — used Windows-style paths (`C:/Games/Game1`)
+   but on Linux `os.path.splitdrive("C:/Games/Game1")` returns `("", path)`
+   because Linux doesn't recognize `C:` as a drive letter. All non-manual
+   games grouped as "—" instead of "SSD"/"D:". Fixed by monkeypatching
+   `os.path.splitdrive` in the test to simulate Windows drive-letter behavior.
+
+2. **`test_export_permission_error_message`** — wrote to a directory path to
+   trigger a permission error. On Windows this raises `PermissionError`; on
+   Linux it raises `IsADirectoryError` (not caught by the `PermissionError`
+   handler in `export_backup`). Fixed by catching `OSError` (parent class)
+   and re-raising as `PermissionError` with the friendly "may be open in
+   another program" message — covers both Windows and Linux I/O failures.
+
 ### 2026-08-16 — Compressed JSON backup/restore
 Added catalog backup and restore via **compressed JSON** (`.json.gz`):
 - **`playcache/backup.py`** — `export_backup(db, path)` serializes every row

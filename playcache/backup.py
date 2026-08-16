@@ -53,7 +53,7 @@ def export_backup(db: Database, output_path: str) -> str:
     try:
         with gzip.open(out, "wt", encoding="utf-8") as fh:
             fh.write(payload)
-    except PermissionError as e:
+    except OSError as e:
         raise PermissionError(
             f"Cannot write to '{out}'. The file may be open in another "
             f"program. Close it and try again."
