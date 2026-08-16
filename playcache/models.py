@@ -81,7 +81,7 @@ class GameRecord:
         drive = os.path.splitdrive(path)[0]  # "C:" on Windows, "" on Linux/Mac
         if not drive:
             return "—"
-        root = os.path.join(drive, os.sep)  # "C:\\"
+        root = f"{drive}{os.sep}"
         label = _volume_label(root)
         if label:
             return label
