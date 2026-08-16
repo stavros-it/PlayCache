@@ -91,6 +91,7 @@ Game DB/
 ├── run.pyw                     # GUI entry point — launches QApplication maximized (no console)
 ├── run.py                     # Console entry point (same app, stdout visible, maximized)
 ├── requirements.txt
+├── playcache.spec               # PyInstaller build spec (portable releases)
 ├── config.example.ini          # Copy to config.ini and fill in API keys
 ├── README.md                   # User-facing docs
 ├── PROJECT_CONTEXT.md          # ← this file
@@ -347,6 +348,15 @@ python run.pyw
 # Backup/restore the catalog programmatically (also available via toolbar)
 python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import export_backup; c=Config(); export_backup(Database(c.db_path), 'catalog_backup.json.gz')"
 python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import import_backup; c=Config(); print(import_backup(Database(c.db_path), 'catalog_backup.json.gz'))"
+
+# Build a portable release locally (requires: pip install pyinstaller)
+pyinstaller playcache.spec --noconfirm
+# Windows: dist/PlayCache/PlayCache.exe
+# Linux:   dist/PlayCache/PlayCache
+
+# Create a GitHub release (triggers CI build of Windows zip + Linux AppImage)
+git tag v1.0.0
+git push --tags
 ```
 
 ## 9. Known limitations & gotchas

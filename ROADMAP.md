@@ -204,9 +204,16 @@ The functional core is solid; these make the app feel professional.
 
 ## 7. Packaging & distribution
 
-- **📋 PyInstaller / Nuitka build** — produce a single `.exe` for distribution
-  to non-developer users. Must bundle PySide6 plugins and handle the
-  `QT_QPA_PLATFORM` fallback.
+- **✅ Portable Windows release** — PyInstaller one-dir bundle zipped as
+  `PlayCache-vX.Y.Z-windows-portable.zip`. User extracts and runs
+  `PlayCache.exe`. No Python install required. Built automatically via CI
+  on tag push.
+- **✅ Linux AppImage** — `PlayCache-vX.Y.Z-linux-x86_64.AppImage`. Built
+  via PyInstaller + linuxdeploy on CI. Download, `chmod +x`, and run.
+  No Python install required.
+- **✅ GitHub Releases** — tag push (`git tag v1.0.0 && git push --tags`)
+  triggers the release workflow, which builds both artifacts and creates a
+  GitHub Release with auto-generated release notes.
 - **📋 Windows installer** — wrap the `.exe` in an Inno Setup or WiX installer
   with Start Menu shortcuts and an uninstaller.
 - **📋 Auto-update** — long-term, a "Check for updates" feature. Out of scope
@@ -235,6 +242,34 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-08-16 — Portable releases (Windows zip + Linux AppImage)
+Added CI-driven release builds triggered on tag push (`v*`):
+
+- **Windows portable** — PyInstaller `--onedir` bundle zipped as
+  `PlayCache-vX.Y.Z-windows-portable.zip`. Contains `PlayCache.exe` + all
+  DLLs + PySide6 plugins + `config.example.ini` + app icon. User extracts
+  and runs — no Python install required.
+- **Linux AppImage** — PyInstaller `--onedir` output wrapped with
+  `linuxdeploy` into a standard AppImage (`PlayCache-vX.Y.Z-linux-x86_64.AppImage`).
+  Includes `.desktop` entry + icon. User downloads, `chmod +x`, and runs.
+- **Config auto-copy** — on first launch, if `config.ini` doesn't exist,
+  `config.example.ini` is automatically copied to the working directory so
+  the user just needs to paste their API key. Implemented in
+  `config.py::_ensure_config_exists()`.
+- **Release workflow** (`.github/workflows/release.yml`) — triggered on tag
+  push. Three jobs: `build-windows` (windows-latest), `build-linux`
+  (ubuntu-latest), `release` (downloads both artifacts and creates a GitHub
+  Release with auto-generated notes via `softprops/action-gh-release`).
+- **PyInstaller spec** (`playcache.spec`) — bundles `config.example.ini` and
+  `playcache/assets/` (icon). Excludes tkinter/test/unittest. Console=False
+  (GUI app). Uses UPX compression.
+- **How to create a release**:
+  ```powershell
+  git tag v1.0.0
+  git push --tags
+  ```
+  The CI builds both artifacts and creates the release automatically.
 
 ### 2026-08-16 — Linux support
 Added cross-platform support for Linux alongside Windows:
