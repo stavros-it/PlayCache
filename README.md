@@ -5,13 +5,12 @@
 <h1 align="center">PlayCache</h1>
 
 <p align="center">
-A <strong>PySide6 desktop GUI</strong> that scans a drive (or folder) of installed games,
-fetches metadata from free online services (<strong>TheGamesDB</strong> primary, <strong>RAWG</strong>
-fallback + merge), and catalogues them into a local <strong>SQLite</strong> database.
-Browse, edit, and export to Excel with a 6-column layout
-(GAME NAME, PLATFORM, GOG / STEAM, USER RATING, GAME TYPE, SHORT DESCRIPTION).
-Ship-ready with a polished dark theme, compressed JSON backups, and a
-statistics dashboard.
+A desktop catalog for every game you own. Point PlayCache at your game folders
+and it fetches covers, ratings, and descriptions from <strong>TheGamesDB</strong>
+(primary) and <strong>RAWG</strong> (fallback + merge), then presents them in a
+polished <strong>dark-themed</strong> view you can search, edit, and export to Excel.
+Backed by a local <strong>SQLite</strong> database with compressed JSON backups and
+a statistics dashboard.
 </p>
 
 <p align="center">
