@@ -120,17 +120,23 @@ def test_stats(tmp_path):
 
 
 def test_stats_distributions(tmp_path, monkeypatch):
-    """Stats correctly bucket games by disk (volume label) and release year."""
-    # Stub volume label lookup so the test is deterministic on any platform.
-    # "C:" has a label, "D:" has none (falls back to drive letter).
+    """Stats correctly bucket games by disk (volume label) and release year.
+
+    This tests the Windows code path (drive letters + Win32 volume labels).
+    We monkeypatch sys.platform to 'win32' so db.stats() takes the Windows
+    branch even when running on Linux CI.
+    """
     from playcache import db as _db
     from playcache import models as _models
     _models._drive_label_cache.clear()
+
+    monkeypatch.setattr(sys, "platform", "win32")
 
     def _fake_label(root: str) -> str:
         return "SSD" if root.upper().startswith("C:") else ""
 
     monkeypatch.setattr(_db, "_volume_label", _fake_label)
+    monkeypatch.setattr(_models, "_volume_label", _fake_label)
 
     # On Linux/Mac, os.path.splitdrive doesn't recognize "C:" as a drive
     # letter. Stub it to mimic Windows behavior so the test is deterministic
