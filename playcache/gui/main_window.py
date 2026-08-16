@@ -858,7 +858,8 @@ class MainWindow(QMainWindow):
         )
         open_folder_action = None
         if n == 1 and not records[0].folder_path.startswith("/manual/"):
-            open_folder_action = menu.addAction("Open folder in Explorer")
+            file_manager = "Explorer" if sys.platform == "win32" else "Files"
+            open_folder_action = menu.addAction(f"Open folder in {file_manager}")
         menu.addSeparator()
         delete_action = menu.addAction(
             "Delete from catalog…" if n == 1 else f"Delete {n} games…"

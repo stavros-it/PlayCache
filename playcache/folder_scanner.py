@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import sys
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -23,12 +24,18 @@ from string import capwords
 
 log = logging.getLogger(__name__)
 
-# Root folders that are definitely not games (typical Windows drive contents)
+# Root folders that are definitely not games (typical OS drive contents).
+# Union of Windows + Linux system folders so the scanner works on both.
 DEFAULT_SKIP = {
+    # Windows
     "windows", "program files", "program files (x86)", "programdata", "users",
     "$recycle.bin", "system volume information", "$winreagent", "$sysreset",
     "$windows.~bt", "recovery", "perflogs", "intel", "amd", "nvidia",
     "msocache", "config.msi",
+    # Linux
+    "boot", "bin", "sbin", "etc", "var", "usr", "lib", "lib64", "lib32",
+    "libx32", "run", "sys", "proc", "dev", "srv", "snap", "lost+found",
+    "swapfile", ".cache", ".config", ".local", "node_modules",
 }
 
 # Folder NAMES (lowercased) that are library containers, not games.
@@ -53,6 +60,13 @@ LIBRARY_ROOTS: list[tuple[str, str]] = [
     (r"\borigin\b", "Origin"),
     (r"ubisoft.*", "Ubisoft"),
     (r"battle\.?net", "Battle.net"),
+    # Linux launchers
+    (r"\bheroic\b", "Heroic"),
+    (r"\blutris\b", "Lutris"),
+    (r"\bbottles\b", "Bottles"),
+    (r"\bminigalaxy\b", "GOG"),
+    (r"\bgamehub\b", "GameHub"),
+    (r"\blegendary\b", "Epic"),
 ]
 
 # Noise tokens to strip from folder names before searching APIs.
@@ -67,6 +81,7 @@ NOISE_TOKENS = [
     "dlc", "all-dlc", "complete-edition", "goty", "direct", "iso",
     "gog", "goggames", "gog-games", "gogalaxy", "goggalaxy",
     "windows", "win", "win64", "win32",
+    "linux", "appimage", "deb", "rpm", "flatpak", "snap",
     "steamrip", "repack-by", "repacks",
 ]
 
@@ -112,10 +127,11 @@ _NON_GAME_EXES = {
     "goggalaxy", "galaxyclient",
 }
 
-# Architecture/platform suffixes to strip from .exe names.
+# Architecture/platform suffixes to strip from executable names.
 _ARCH_SUFFIXES = re.compile(
     r"(?:[_\-]?(?:x64|x86|win64|win32|vk|vulkan|dx11|dx12|"
-    r"d3d11|d3d12|64bit|32bit))+$",
+    r"d3d11|d3d12|64bit|32bit|"
+    r"linux|linux64|i386|arm|aarch64|appimage|gl|ogl|x11|wayland))+$",
     re.IGNORECASE,
 )
 
@@ -123,13 +139,15 @@ _ARCH_SUFFIXES = re.compile(
 _CAMEL_SPLIT = re.compile(r"([a-z])([A-Z])")
 _ALLCAPS_SPLIT = re.compile(r"([A-Z]{2,})([A-Z][a-z])")
 
-# GOG setup executable pattern: setup_<gamename>_<version>_(<id>).exe
-_GOG_SETUP_RE = re.compile(r"^setup_(.+)\.exe$", re.IGNORECASE)
+# GOG setup installer pattern: setup_<gamename>_<version>_(<id>).{exe,sh,bin}
+# .exe = Windows installer, .sh = Linux installer, .bin = generic binary
+_GOG_SETUP_RE = re.compile(r"^setup_(.+)\.(?:exe|sh|bin)$", re.IGNORECASE)
 
 # Tokens that are noise in GOG setup exe filenames
 _GOG_SETUP_NOISE = {
     "gog", "steam", "epic", "dlc", "multi", "multi5", "multi7", "multi9",
     "windows", "win", "win64", "win32", "x64", "x86",
+    "linux", "linux64", "appimage",
     "multilanguage", "multi-language", "artbook", "soundtrack", "ost",
     "bonus", "pack",
 }
@@ -263,7 +281,8 @@ def scan_games(
     Parameters
     ----------
     root : str
-        Drive letter (e.g. ``D:``) or a folder path.
+        Drive letter (e.g. ``D:`` on Windows) or a folder path
+        (e.g. ``/mnt/games`` or ``~/.steam/steam`` on Linux).
     recursive : bool
         If True, also descend into grouping folders that contain only subfolders.
     skip : set[str], optional
@@ -378,7 +397,7 @@ def _clean_exe_name(filename: str) -> str:
     (``DOOMEternal`` → ``DOOM Eternal``), and architecture suffixes
     (``Game-x64vk`` → ``Game``).
     """
-    name = re.sub(r"\.exe$", "", filename, flags=re.IGNORECASE)
+    name = re.sub(r"\.(exe|sh|bin|appimage)$", "", filename, flags=re.IGNORECASE)
     name = _ARCH_SUFFIXES.sub("", name)
     name = _ALLCAPS_SPLIT.sub(r"\1 \2", name)
     name = _CAMEL_SPLIT.sub(r"\1 \2", name)
@@ -419,23 +438,70 @@ def _clean_gog_setup_name(filename: str) -> str:
     return capwords(" ".join(kept))
 
 
+# Extensions of game executables on Windows and Linux.
+_GAME_EXE_EXTENSIONS = {".exe", ".appimage", ".sh", ".bin"}
+# Linux shell-script names that are launchers, not games.
+_NON_GAME_SCRIPTS = {"start", "run", "launch", "play", "startup"}
+
+
+def _is_linux_executable(entry: Path) -> bool:
+    """Check if a file is a Linux executable (ELF binary, AppImage, or script).
+
+    On non-Linux platforms, returns False (we only scan for .exe there).
+    """
+    if sys.platform == "win32":
+        return False
+    try:
+        if not entry.is_file():
+            return False
+        suffix = entry.suffix.lower()
+        if suffix == ".appimage":
+            return True
+        if suffix in (".sh", ".bin"):
+            return os.access(entry, os.X_OK)
+        # Extensionless file: check if executable and has ELF magic
+        if not suffix:
+            if not os.access(entry, os.X_OK):
+                return False
+            try:
+                with open(entry, "rb") as fh:
+                    return fh.read(4) == b"\x7fELF"
+            except OSError:
+                return False
+    except OSError:
+        pass
+    return False
+
+
 def _find_game_exes(folder: Path, max_depth: int = 1) -> list[tuple[str, int]]:
-    """Find .exe files that are likely the game binary (not launchers).
+    """Find executable files that are likely the game binary (not launchers).
 
     Returns list of ``(cleaned_name, file_size)`` sorted by size descending.
     Searches the immediate folder and one level of subfolders (skipping
     ``data/``, ``cache/``, etc.).
+
+    On Windows, scans for ``.exe`` files. On Linux, also detects ELF binaries,
+    ``.AppImage``, ``.sh``, and ``.bin`` files with the executable bit set.
     """
     exes: list[tuple[str, int]] = []
+
+    def _is_game_binary(entry: Path) -> bool:
+        """True if this file could be a game executable on this platform."""
+        suffix = entry.suffix.lower()
+        if sys.platform == "win32":
+            return suffix == ".exe"
+        if suffix == ".exe":
+            return True  # Wine/Proton games
+        return _is_linux_executable(entry)
 
     def _scan_dir(d: Path, depth: int) -> None:
         try:
             for entry in d.iterdir():
                 if entry.is_file():
-                    if entry.suffix.lower() != ".exe":
+                    if not _is_game_binary(entry):
                         continue
                     stem = entry.stem.lower()
-                    if stem in _NON_GAME_EXES:
+                    if stem in _NON_GAME_EXES or stem in _NON_GAME_SCRIPTS:
                         continue
                     if stem.startswith("setup_"):
                         continue  # GOG setup — handled separately
@@ -452,7 +518,7 @@ def _find_game_exes(folder: Path, max_depth: int = 1) -> list[tuple[str, int]]:
                     if not entry.name.startswith(".") and entry.name.lower() not in _SKIP_SUBDIRS:
                         _scan_dir(entry, depth + 1)
         except (PermissionError, OSError) as e:
-            log.debug("Cannot scan %s for .exe files: %s", d, e)
+            log.debug("Cannot scan %s for executables: %s", d, e)
 
     _scan_dir(folder, 0)
     exes.sort(key=lambda x: x[1], reverse=True)
@@ -460,19 +526,22 @@ def _find_game_exes(folder: Path, max_depth: int = 1) -> list[tuple[str, int]]:
 
 
 def _find_gog_setup_exe(folder: Path) -> str | None:
-    """Find a GOG setup executable and extract the game name from its filename.
+    """Find a GOG setup installer and extract the game name from its filename.
 
-    GOG setup exes look like ``setup_achilles_legends_untold_1.4.0.0_(74603).exe``.
-    When multiple setup exes exist (game + DLC/artbook/soundtrack), the one
-    with the shortest extracted name is preferred (the main game, not DLC).
-    Returns the extracted game name, or ``None`` if no GOG setup exe is found.
+    GOG setup installers look like
+    ``setup_achilles_legends_untold_1.4.0.0_(74603).exe`` (Windows) or
+    ``setup_achilles_legends_untold_1.4.0.0_(74603).sh`` (Linux).
+    When multiple setup installers exist (game + DLC/artbook/soundtrack), the
+    one with the shortest extracted name is preferred (the main game, not DLC).
+    Returns the extracted game name, or ``None`` if no GOG setup is found.
     """
     candidates: list[str] = []
     try:
         for entry in folder.iterdir():
             if not entry.is_file():
                 continue
-            if entry.suffix.lower() != ".exe":
+            suffix = entry.suffix.lower()
+            if suffix not in (".exe", ".sh", ".bin"):
                 continue
             if not entry.name.lower().startswith("setup_"):
                 continue
@@ -482,7 +551,7 @@ def _find_gog_setup_exe(folder: Path) -> str | None:
             if _looks_like_game_name(name):
                 candidates.append(name)
     except (PermissionError, OSError) as e:
-        log.debug("Cannot find GOG setup exe in %s: %s", folder, e)
+        log.debug("Cannot find GOG setup in %s: %s", folder, e)
     if not candidates:
         return None
     # Prefer the shortest extracted name (main game, not DLC/artbook)

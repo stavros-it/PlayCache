@@ -4,14 +4,106 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import asdict, dataclass, fields
+from pathlib import Path
 
 _drive_label_cache: dict[str, str] = {}
+_mount_cache: list[tuple[str, str, str]] | None = None
+
+
+def _load_mounts() -> list[tuple[str, str, str]]:
+    """Read /proc/mounts and return [(device, mount_point, fs_type), ...].
+
+    Sorted by mount-point length descending so the longest-prefix match is
+    found first. Cached for the process lifetime.
+    """
+    global _mount_cache
+    if _mount_cache is not None:
+        return _mount_cache
+    mounts: list[tuple[str, str, str]] = []
+    try:
+        with open("/proc/mounts", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 3:
+                    dev, mp, fs = parts[0], parts[1], parts[2]
+                    mp = os.path.normpath(mp)
+                    mounts.append((dev, mp, fs))
+        mounts.sort(key=lambda x: len(x[1]), reverse=True)
+    except (OSError, UnicodeDecodeError):
+        pass
+    _mount_cache = mounts
+    return mounts
+
+
+def _linux_mount_for(path: str) -> str:
+    """Return the mount point that contains ``path`` (e.g. ``/home`` or ``/``).
+
+    Walks up the path tree until the device number (``st_dev``) changes,
+    which identifies the mount boundary. Falls back to the longest
+    mount-point-prefix from /proc/mounts.
+    """
+    resolved = os.path.realpath(path)
+    try:
+        target_dev = os.stat(resolved).st_dev
+    except OSError:
+        target_dev = 0
+
+    current = resolved
+    while current and current != os.sep:
+        parent = os.path.dirname(current)
+        if not parent or parent == current:
+            break
+        try:
+            parent_dev = os.stat(parent).st_dev
+        except OSError:
+            break
+        if parent_dev != target_dev:
+            return current
+        current = parent
+
+    for _dev, mp, _fs in _load_mounts():
+        if resolved == mp or resolved.startswith(mp + os.sep):
+            return mp
+
+    return current if current and current != os.sep else os.sep
+
+
+def _linux_volume_label(mount_point: str) -> str:
+    """Get the filesystem label for a Linux mount point.
+
+    Tries /dev/disk/by-label/ symlinks first (no subprocess), then falls
+    back to reading the device from /proc/mounts and checking by-label.
+    Returns the mount point itself if no label is found (more useful than
+    an empty string for grouping).
+    """
+    for dev, mp, _fs in _load_mounts():
+        if mp == mount_point and dev.startswith("/dev/"):
+            base = os.path.basename(dev)
+            by_label = Path("/dev/disk/by-label")
+            if by_label.is_dir():
+                try:
+                    for entry in by_label.iterdir():
+                        try:
+                            if os.path.realpath(entry) == dev:
+                                return entry.name
+                        except OSError:
+                            continue
+                except OSError:
+                    pass
+            return base
+    return mount_point
 
 
 def _volume_label(drive_root: str) -> str:
-    """Get the volume label for a drive root (e.g. ``C:\\``). Cached.
+    """Get the volume label for a drive root. Cached.
 
-    Returns an empty string on non-Windows or if the drive has no label.
+    On Windows, ``drive_root`` is a drive letter root (e.g. ``C:\\``) and
+    the label is fetched via the Win32 ``GetVolumeInformationW`` API.
+
+    On Linux, ``drive_root`` is a mount point (e.g. ``/home`` or ``/``) and
+    the label is resolved from /dev/disk/by-label or /proc/mounts.
+
+    Returns an empty string if the label can't be determined.
     """
     if drive_root in _drive_label_cache:
         return _drive_label_cache[drive_root]
@@ -28,6 +120,8 @@ def _volume_label(drive_root: str) -> str:
                 label = buf.value or ""
         except (OSError, AttributeError):
             pass
+    elif sys.platform.startswith("linux"):
+        label = _linux_volume_label(drive_root)
     _drive_label_cache[drive_root] = label
     return label
 
@@ -71,21 +165,26 @@ class GameRecord:
     def disk(self) -> str:
         """Display name of the disk/drive this game lives on.
 
-        Returns the volume label (e.g. ``"TOSHIBA 2TB"``) when available.
-        Falls back to the drive letter (``"D:"``) if the drive has no label.
-        Manual entries (no real folder) return ``"Manual"``.
+        - **Windows**: returns the volume label (e.g. ``"TOSHIBA 2TB"``) when
+          available, falling back to the drive letter (``"D:"``).
+        - **Linux**: returns the filesystem label or device name for the mount
+          point containing the path (e.g. ``"nvme0n1p2"`` or ``"Games"``).
+          Falls back to the mount point (e.g. ``/mnt/games``).
+        - **Manual entries** (``/manual/...`` paths) return ``"Manual"``.
         """
         path = self.folder_path or ""
         if not path or path.startswith("/manual/"):
             return "Manual"
-        drive = os.path.splitdrive(path)[0]  # "C:" on Windows, "" on Linux/Mac
-        if not drive:
-            return "—"
-        root = f"{drive}{os.sep}"
-        label = _volume_label(root)
-        if label:
-            return label
-        return drive
+        if sys.platform == "win32":
+            drive = os.path.splitdrive(path)[0]
+            if not drive:
+                return "—"
+            root = f"{drive}{os.sep}"
+            label = _volume_label(root)
+            return label or drive
+        mount = _linux_mount_for(path)
+        label = _volume_label(mount)
+        return label or mount
 
     @property
     def release_date_display(self) -> str:
