@@ -1,16 +1,25 @@
-# PlayCache
+<p align="center">
+  <img src="playcache/assets/app.png" alt="PlayCache" width="128" height="128">
+</p>
 
-A **PySide6 desktop GUI** that scans a drive (or folder) of installed games,
-fetches metadata from free online services (**TheGamesDB** primary, **RAWG**
-fallback + merge), and catalogues them into a local **SQLite** database.
-Browse, edit, and export to Excel matching the `Game_Library.xlsx` layout.
+<h1 align="center">PlayCache</h1>
+
+<p align="center">
+A <strong>PySide6 desktop GUI</strong> that scans a drive (or folder) of installed games,
+fetches metadata from free online services (<strong>TheGamesDB</strong> primary, <strong>RAWG</strong>
+fallback + merge), and catalogues them into a local <strong>SQLite</strong> database.
+Browse, edit, and export to Excel matching the <code>Game_Library.xlsx</code> layout.
 Ship-ready with a polished dark theme, compressed JSON backups, and a
 statistics dashboard.
+</p>
 
-![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
-![PySide6 6.11](https://img.shields.io/badge/PySide6-6.11-green)
-![Tests: 119](https://img.shields.io/badge/tests-119-brightgreen)
-![License: Proprietary](https://img.shields.io/badge/license-proprietary-lightgrey)
+<p align="center">
+  <a href="https://github.com/stavros-it/PlayCache/actions"><img src="https://github.com/stavros-it/PlayCache/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+  <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
+  <img src="https://img.shields.io/badge/tests-119-brightgreen" alt="Tests: 119">
+  <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
+</p>
 
 ---
 
