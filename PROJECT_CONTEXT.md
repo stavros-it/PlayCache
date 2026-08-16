@@ -8,8 +8,9 @@
 **PlayCache** is a Windows desktop application (PySide6 GUI) that scans a
 drive or folder of installed games, fetches metadata from free online services
 (TheGamesDB primary, RAWG fallback + merge step), and catalogues them into a
-local SQLite database. The data model and Excel export mirror an existing
-reference file, `Game_Library.xlsx` (135 games, 6 columns).
+local SQLite database. The data model and Excel export follow a 6-column
+reference layout (GAME NAME, PLATFORM, GOG / STEAM, USER RATING, GAME TYPE,
+SHORT DESCRIPTION).
 
 ### Primary user workflow
 1. Launch `python run.pyw` → the GUI opens **maximized** (stdout/stderr
@@ -62,7 +63,7 @@ reference file, `Game_Library.xlsx` (135 games, 6 columns).
 | GUI theme | Hand-rolled QSS in `playcache/gui/theme.py` | Centralized slate-based dark palette; smart text color via WCAG luminance |
 | Storage | SQLite (stdlib `sqlite3`) | Single-file DB; `v_excel` view mirrors the xlsx layout |
 | HTTP | `requests` | Synchronous calls; runs inside background threads |
-| Excel export | `openpyxl` | Matches `Game_Library.xlsx` headers/formatting |
+| Excel export | `openpyxl` | Matches the 6-column reference Excel layout |
 | Backup format | gzip-compressed JSON (`.json.gz`) | stdlib `gzip` + `json`; versioned envelope |
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
@@ -90,7 +91,6 @@ Game DB/
 ├── README.md                   # User-facing docs
 ├── PROJECT_CONTEXT.md          # ← this file
 ├── ROADMAP.md                  # planned work
-├── Game_Library.xlsx           # Reference catalog (135 games, 6 columns)
 ├── scripts/                    # Developer utilities
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
@@ -206,7 +206,7 @@ Game DB/
    cataloger re-applies the game's `manual_overrides` map so user edits are
    never overwritten by fresh API data.
 5. **Persist** (`Database.upsert`): SQLite `INSERT ... ON CONFLICT(folder_path)
-   DO UPDATE`; the `v_excel` view reproduces the exact `Game_Library.xlsx`
+   DO UPDATE`; the `v_excel` view reproduces the 6-column reference Excel layout
    columns for export.
 
 ## 5. Data model
@@ -461,7 +461,6 @@ python -c "from playcache.config import Config; from playcache.db import Databas
 
 | File | Purpose |
 |------|---------|
-| `Game_Library.xlsx` | Reference catalog: 135 games, 6 columns. The schema and export format must match this. |
 | `config.example.ini` | Template for all configurable settings. |
 | `README.md` | User-facing documentation. |
 | `PROJECT_CONTEXT.md` | This file — architectural and conventions reference. |

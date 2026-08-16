@@ -35,6 +35,23 @@ When making any change to the codebase — bug fix, feature, refactor, docs —
    The remote is `https://github.com/stavros-it/PlayCache.git` (already
    configured as `origin` on the `main` branch).
 
+## Pre-push safety check
+
+Before every commit/push, verify that **no secrets or user data** are staged:
+
+```powershell
+git ls-files          # tracked files (must NOT include config.ini, *.db, *.xlsx, *.log)
+git diff --cached --name-only
+```
+
+- `config.ini` (contains API keys) — gitignored, local-only
+- `game_library.db` (your catalog) — gitignored, local-only
+- `covers/` (cached cover images) — gitignored, local-only
+- `*.xlsx`, `*.json.gz`, `*.log` — gitignored
+
+If any of these appear in `git ls-files`, **do not push** — fix `.gitignore`
+first and `git rm --cached` the file.
+
 ## Commit message style
 
 - Imperative mood: "Add backup feature", not "Added backup feature"
