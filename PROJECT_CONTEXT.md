@@ -390,6 +390,11 @@ python -c "from playcache.config import Config; from playcache.db import Databas
     defaults.
   - **Exporter** adds Excel auto-filter and friendly `PermissionError` message
     (was raw traceback when file was open in Excel).
+  - **Cross-platform tests** — `test_stats_distributions` now mocks
+    `os.path.splitdrive` to simulate Windows drive letters on Linux CI;
+    `export_backup` catches `OSError` (not just `PermissionError`) so
+    `IsADirectoryError` on Linux also gets the friendly "may be open in
+    another program" message.
   - **`run.py`** now configures logging (was dropping all diagnostics).
   - **`run.pyw`** removes redundant import and falls back to stderr when Qt is
     unavailable.

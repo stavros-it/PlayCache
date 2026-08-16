@@ -1,4 +1,5 @@
 """Tests for the SQLite database layer (no network)."""
+import os
 from pathlib import Path
 
 from playcache.db import Database
@@ -129,6 +130,16 @@ def test_stats_distributions(tmp_path, monkeypatch):
         return "SSD" if root.upper().startswith("C:") else ""
 
     monkeypatch.setattr(_db, "_volume_label", _fake_label)
+
+    # On Linux/Mac, os.path.splitdrive doesn't recognize "C:" as a drive
+    # letter. Stub it to mimic Windows behavior so the test is deterministic
+    # across platforms.
+    def _fake_splitdrive(path: str) -> tuple[str, str]:
+        if len(path) >= 2 and path[1] == ":":
+            return (path[:2], path[2:])
+        return ("", path)
+
+    monkeypatch.setattr(os.path, "splitdrive", _fake_splitdrive)
 
     db = Database(str(tmp_path / "test.db"))
     db.upsert(_sample_record(folder_path="C:/Games/Game1", release_date="2017-02-24"))
