@@ -204,7 +204,7 @@ class Database:
                     key = "Manual"
                 else:
                     drive = os.path.splitdrive(folder_path)[0]
-                    root = os.path.join(drive, os.sep) if drive else ""
+                    root = f"{drive}{os.sep}" if drive else ""
                     label = _volume_label(root) if root else ""
                     key = label or drive or "—"
                 label_counts[key] = label_counts.get(key, 0) + 1
