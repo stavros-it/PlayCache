@@ -5,12 +5,12 @@
 
 ## 1. What this project is
 
-**PlayCache** is a Windows desktop application (PySide6 GUI) that scans a
-drive or folder of installed games, fetches metadata from free online services
-(TheGamesDB primary, RAWG fallback + merge step), and catalogues them into a
-local SQLite database. The data model and Excel export follow a 6-column
-reference layout (GAME NAME, PLATFORM, GOG / STEAM, USER RATING, GAME TYPE,
-SHORT DESCRIPTION).
+**PlayCache** is a cross-platform desktop application (PySide6 GUI) for
+**Windows and Linux** that scans a drive or folder of installed games, fetches
+metadata from free online services (TheGamesDB primary, RAWG fallback + merge
+step), and catalogues them into a local SQLite database. The data model and
+Excel export follow a 6-column reference layout (GAME NAME, PLATFORM,
+GOG / STEAM, USER RATING, GAME TYPE, SHORT DESCRIPTION).
 
 Development was led by **Stavros Antoniou** with the assistance of AI tools
 (Claude and GLM-5.2 via the OpenCode CLI). All code, tests, and docs were
