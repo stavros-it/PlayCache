@@ -243,6 +243,36 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-08-16 — Single-source versioning across app + repo + releases
+Before this change, `1.0.0` appeared in two places: `playcache/__init__.py`
+(`__version__`) and `pyproject.toml` (`version = "1.0.0"`). They could drift.
+Now `pyproject.toml` declares `dynamic = ["version"]` and reads from
+`playcache.__version__` via `tool.setuptools.dynamic.version`, so there is
+exactly one source of truth.
+
+Additional version surface area added:
+
+- **`--version` flag** on both `run.py` and `run.pyw` (via `argparse`):
+  `python run.py --version` → `PlayCache 1.0.0`. Standard CLI convention.
+- **Window title** now shows the version: `PlayCache 1.0.0` (was just
+  `PlayCache`). Visible at a glance in the title bar + taskbar.
+- **Status bar permanent label** on the right: `v1.0.0`. Doesn't interfere
+  with the transient status messages (game counts, API quota) on the left.
+- **`QApplication.setApplicationVersion(__version__)`** — sets the app
+  version metadata on the Qt side (used by some platform integrations).
+- **CI release workflow stamps the version from the git tag**: pushing
+  `v1.2.3` rewrites `__version__ = "1.2.3"` in `__init__.py` *during the
+  build only* (not committed), so the built `.exe` / AppImage reports the
+  correct version. The committed `__version__` stays at the last manually
+  bumped value (currently `1.0.0`) until we bump it on `main`.
+
+**Convention going forward**: bump `__version__` in
+`playcache/__init__.py` as the single source of truth. Tag pushes with a
+matching `vX.Y.Z` trigger a release that will use that version. Tag pushes
+with a *different* version override the in-source value during the build
+(useful for `v1.0.1` hotfix releases off `main` without a version bump
+commit).
+
 ### 2026-08-16 — Portable releases (Windows zip + Linux AppImage)
 Added CI-driven release builds triggered on tag push (`v*`):
 

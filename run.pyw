@@ -70,14 +70,24 @@ def main() -> int:
     log = logging.getLogger("launcher")
 
     try:
+        import argparse
+
         from PySide6.QtGui import QIcon
         from PySide6.QtWidgets import QApplication
 
+        from playcache import __version__
         from playcache.config import Config
         from playcache.gui import MainWindow
 
+        parser = argparse.ArgumentParser(prog="playcache", description="PlayCache GUI")
+        parser.add_argument(
+            "--version", action="version", version=f"PlayCache {__version__}"
+        )
+        parser.parse_args()
+
         app = QApplication(sys.argv)
         app.setApplicationName("PlayCache")
+        app.setApplicationVersion(__version__)
 
         # Set the app icon early (taskbar + Alt-Tab on Windows)
         if sys.platform == "win32":

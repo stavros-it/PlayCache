@@ -304,6 +304,13 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   Never hardcode hex colors in dialogs/widgets; import from `theme.py` so the
   palette stays consistent. `contrast_text(bg_hex)` picks white or dark slate
   text based on WCAG luminance — use it for any text rendered on a colored fill.
+- **Version single source of truth** — `playcache/__init__.py::__version__`
+  is the only place the version is hardcoded. `pyproject.toml` reads it
+  dynamically (`tool.setuptools.dynamic.version`). The window title
+  (`PlayCache X.Y.Z`), the status bar permanent label (`vX.Y.Z`), the About
+  dialog, the `--version` CLI flag, and the backup envelope all reference
+  `__version__`. The release workflow stamps the version from the git tag
+  during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
 - **Tests**: `python -m pytest tests/ -q` must pass (currently 121 passing).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.

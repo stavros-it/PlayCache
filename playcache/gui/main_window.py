@@ -39,7 +39,7 @@ from .scan_dialog import ScanDialog
 from .settings_dialog import SettingsDialog
 from .stats_dialog import StatsDialog
 from .table_model import GamesTableModel
-from .theme import DARK_QSS
+from .theme import DARK_QSS, TEXT_MUTED
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +155,9 @@ class MainWindow(QMainWindow):
 
     def __init__(self, config: Config, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle("PlayCache")
+        from ..__init__ import __version__
+
+        self.setWindowTitle(f"PlayCache {__version__}")
         self.resize(1280, 800)
         self.setStyleSheet(DARK_QSS)
         self._set_window_icon()
@@ -178,6 +180,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._refresh_table()
         self._update_status_bar()
+        self._setup_statusbar_version()
         self._fetch_quota_on_startup()
 
     def _fetch_quota_on_startup(self) -> None:
@@ -915,6 +918,14 @@ class MainWindow(QMainWindow):
         self.detail.set_record(None)
 
     # ------------------------------------------------------------------ #
+    def _setup_statusbar_version(self) -> None:
+        """Add a permanent version label on the right of the status bar."""
+        from ..__init__ import __version__
+
+        lbl = QLabel(f"v{__version__}")
+        lbl.setStyleSheet(f"color: {TEXT_MUTED}; padding: 0 6px;")
+        self.statusBar().addPermanentWidget(lbl)
+
     def _update_status_bar(self) -> None:
         total = self._db.count()
         stats = self._db.stats()
