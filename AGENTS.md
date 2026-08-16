@@ -35,6 +35,25 @@ When making any change to the codebase — bug fix, feature, refactor, docs —
    The remote is `https://github.com/stavros-it/PlayCache.git` (already
    configured as `origin` on the `main` branch).
 
+5. **Check the latest CI run** after pushing:
+   ```powershell
+   # Fetch the latest run status via the GitHub API
+   curl -s https://api.github.com/repos/stavros-it/PlayCache/commits/$($(git rev-parse HEAD))/check-runs | python -m json.tool
+   ```
+   Or fetch: `https://api.github.com/repos/stavros-it/PlayCache/commits/<SHA>/check-runs`
+   and look at `"conclusion"` — it must be `"success"`.
+
+   - If the CI **passes**, the task is complete.
+   - If the CI **fails**, read the error output, fix the issue locally
+     (tests, lint, platform-specific code), and push a new commit. Repeat
+     until the latest CI run is green.
+
+   Common CI failures on Linux that don't show on Windows:
+   - Platform-specific code paths (e.g. `os.path.splitdrive`, `sys.platform`)
+   - `PermissionError` vs `IsADirectoryError` when writing to directories
+   - Windows API calls (`ctypes.windll`) not guarded by `sys.platform == "win32"`
+   - Path separators and drive-letter assumptions in tests
+
 ## Pre-push safety check
 
 Before every commit/push, verify that **no secrets or user data** are staged:
