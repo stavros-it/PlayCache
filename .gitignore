@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Catalog artifacts
+*.db
+*.db-journal
+*.log
+*.json.gz
+config.ini
+!config.example.ini
+
+# Cover image cache (user data)
+covers/
+
+# Exported catalogs
+*.xlsx
+!Game_Library.xlsx
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
