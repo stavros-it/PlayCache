@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import sys
 from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
-from .models import GameRecord, _volume_label
+from .models import GameRecord, _linux_mount_for, _volume_label
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS games (
@@ -191,9 +192,11 @@ class Database:
             by_store = _group("store")
             by_esrb = _group("esrb_rating")
 
-            # Disk: group by volume label (resolved from drive letter via
-            # Windows API). Manual entries (/manual/...) grouped as "Manual".
-            # Falls back to drive letter if no label is available.
+            # Disk: group by volume label.
+            # - Windows: resolved from drive letter via Win32 API
+            # - Linux: resolved from mount point via /proc/mounts + by-label
+            # - Manual entries (/manual/...) grouped as "Manual"
+            # Falls back to drive letter (Windows) or mount point (Linux).
             # folder_path has a UNIQUE constraint so no GROUP BY is needed.
             by_disk_rows = conn.execute(
                 "SELECT folder_path FROM games;"
@@ -202,11 +205,15 @@ class Database:
             for (folder_path,) in by_disk_rows:
                 if not folder_path or folder_path.startswith("/manual/"):
                     key = "Manual"
-                else:
+                elif sys.platform == "win32":
                     drive = os.path.splitdrive(folder_path)[0]
                     root = f"{drive}{os.sep}" if drive else ""
                     label = _volume_label(root) if root else ""
                     key = label or drive or "—"
+                else:
+                    mount = _linux_mount_for(folder_path)
+                    label = _volume_label(mount) if mount else ""
+                    key = label or mount or "—"
                 label_counts[key] = label_counts.get(key, 0) + 1
             by_disk = dict(
                 sorted(label_counts.items(), key=lambda kv: kv[1], reverse=True)

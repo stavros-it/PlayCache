@@ -62,7 +62,10 @@
   persist to DB; image cache validates before caching and cancels in-flight on
   clear; API clients honor Retry-After and don't retry 4xx; settings use atomic
   writes; main window guards against concurrent workers and client-swap races.
-- ✅ 103 tests passing, ruff clean
+- ✅ Cross-platform support (Windows + Linux) — scanner detects Linux system
+  folders and ELF/AppImage/.sh executables; volume labels resolved via
+  `/proc/mounts`; `.desktop` file generation on Linux
+- ✅ 121 tests passing, ruff clean
 
 ## Priorities
 
@@ -232,6 +235,38 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-08-16 — Linux support
+Added cross-platform support for Linux alongside Windows:
+
+- **Volume labels** — `_volume_label()` in `models.py` now has a Linux
+  implementation that reads `/proc/mounts` and `/dev/disk/by-label/` to
+  resolve filesystem labels (e.g. "nvme0n1p2", "Games HDD"). Previously
+  returned `""` on Linux, making the disk-grouping feature useless.
+- **Disk property** — `GameRecord.disk` on Linux walks up the path tree
+  checking `st_dev` changes to find the mount boundary, then resolves the
+  label. Previously returned `"—"` for every Linux game. The `db.stats()`
+  `by_disk` distribution uses the same logic.
+- **Scanner** — `DEFAULT_SKIP` now includes Linux system directories
+  (`/etc`, `/var`, `/usr`, `/proc`, `/sys`, `/dev`, `/boot`, `/bin`, `/sbin`,
+  `/lib`, `/run`, `/srv`, `/snap`, etc.). `_find_game_exes()` detects Linux
+  executables (ELF binaries via magic bytes, `.AppImage`, `.sh`, `.bin`)
+  alongside `.exe` files (Wine/Proton games). GOG `.sh` installers are
+  recognized by `_GOG_SETUP_RE` and `_find_gog_setup_exe()`. Architecture
+  suffixes include Linux variants (`linux`, `linux64`, `i386`, `arm`,
+  `aarch64`, `appimage`, `gl`, `x11`, `wayland`).
+- **Store detection** — added Linux launcher patterns: Heroic, Lutris,
+  Bottles, Minigalaxy, GameHub, Legendary.
+- **GUI** — "Open folder in Explorer" → "Open folder in Files" on Linux.
+  Scan dialog placeholder shows Linux path examples (`/mnt/games`,
+  `~/.steam/steam`) on Linux.
+- **Shortcuts** — `scripts/make_shortcut.py` now generates a FreeDesktop
+  `.desktop` entry on Linux (to `~/.local/share/applications/`) instead of
+  aborting with "Windows-only".
+- **Config** — `config.example.ini` `skip_folders` now includes both Windows
+  and Linux system folders.
+- **Tests** — added `test_stats_distributions_linux` and
+  `test_disk_property_linux` to cover the Linux code paths on any OS.
 
 ### 2026-08-16 — Fix CI: cross-platform test compatibility
 The GitHub Actions CI workflow runs on Ubuntu, but two tests were

@@ -63,7 +63,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Layer | Choice | Notes |
 |-------|--------|-------|
 | Language | Python 3.12+ | Uses `from __future__ import annotations` for PEP 604 unions |
-| GUI framework | PySide6 6.11 (LGPL) | Qt's model/view architecture, signals/slots, QThread |
+| GUI framework | PySide6 6.11 (LGPL) | Qt's model/view architecture, signals/slots, QThread. Cross-platform (Windows + Linux). |
 | GUI theme | Hand-rolled QSS in `playcache/gui/theme.py` | Centralized slate-based dark palette; smart text color via WCAG luminance |
 | Storage | SQLite (stdlib `sqlite3`) | Single-file DB; `v_excel` view mirrors the xlsx layout |
 | HTTP | `requests` | Synchronous calls; runs inside background threads |
@@ -72,7 +72,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 119 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 121 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -135,7 +135,7 @@ Game DB/
     └── test_backup.py               # 16 tests (compressed JSON round-trip)
 ```
 
-**Total**: ~5,701 LOC source + ~1,422 LOC tests = ~7,123 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,881 LOC source + ~1,500 LOC tests = ~7,381 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -304,7 +304,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   palette stays consistent. `contrast_text(bg_hex)` picks white or dark slate
   text based on WCAG luminance — use it for any text rendered on a colored fill.
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 119 passing).
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 121 passing).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)
@@ -415,6 +415,15 @@ python -c "from playcache.config import Config; from playcache.db import Databas
   Game column is case-insensitive with a stable tiebreak by source row. If the
   user clicks another column header, that sort takes over until the next
   model reset (which reverts to the default).
+- **Cross-platform support** — Windows and Linux. The scanner detects Linux
+  system folders (`/etc`, `/var`, `/usr`, `/proc`, `/sys`, `/dev`, etc.) and
+  skips them. Linux executables (ELF binaries, `.AppImage`, `.sh`, `.bin`)
+  are detected alongside `.exe` files (Wine/Proton games). GOG `.sh`
+  installers are recognized. Volume labels on Linux are resolved via
+  `/proc/mounts` and `/dev/disk/by-label/`. The `disk` property uses
+  mount-point resolution (walking `st_dev` changes) instead of drive letters.
+  A `.desktop` file is generated on Linux by `scripts/make_shortcut.py`.
+  macOS is not yet tested but the GUI (Qt) is cross-platform.
 - **No commits yet** — the repo is in its initial uncommitted state. The first
   commit should establish `main` with the current tree.
 - **RAWG currently unreachable** — as of 2025-08-16 the RAWG API returns HTTP
@@ -457,9 +466,9 @@ python -c "from playcache.config import Config; from playcache.db import Databas
 - **Rescan refetches all rows** — `_run_refetch_all` in `main_window.py`
   re-fetches every record sequentially; for 135 games at 0.3s delay + network
   latency, a full rescan takes ~1–2 minutes. There's no per-row throttle UI yet.
-- **Platform is Windows-first** — the scanner skips Windows system folders;
-  macOS/Linux users would need to extend `DEFAULT_SKIP`. The GUI itself is
-  cross-platform via Qt.
+- **Platform is Windows + Linux** — the scanner skips both Windows system
+  folders and Linux system directories. macOS is not yet tested. The GUI
+  itself is cross-platform via Qt.
 
 ## 10. Source of truth files
 

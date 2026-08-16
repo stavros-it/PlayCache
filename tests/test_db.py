@@ -1,5 +1,6 @@
 """Tests for the SQLite database layer (no network)."""
 import os
+import sys
 from pathlib import Path
 
 from playcache.db import Database
@@ -168,3 +169,69 @@ def test_reset_fetch_status(tmp_path):
     rec = db.get_by_path("/games/1")
     assert rec.fetch_status == "pending"
     assert rec.data_source == ""
+
+
+def test_stats_distributions_linux(tmp_path, monkeypatch):
+    """Linux disk stats group by mount-point label, not drive letter."""
+    from playcache import db as _db
+    from playcache import models as _models
+    _models._drive_label_cache.clear()
+
+    monkeypatch.setattr(_models.sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    def _fake_mount(path: str) -> str:
+        if path.startswith("/home"):
+            return "/home"
+        if path.startswith("/mnt"):
+            return "/mnt/games"
+        return "/"
+
+    def _fake_label(mount: str) -> str:
+        return {"/home": "SSD", "/mnt/games": "Games HDD", "/": ""}.get(
+            mount, ""
+        )
+
+    monkeypatch.setattr(_db, "_linux_mount_for", _fake_mount)
+    monkeypatch.setattr(_db, "_volume_label", _fake_label)
+    monkeypatch.setattr(_models, "_linux_mount_for", _fake_mount)
+    monkeypatch.setattr(_models, "_volume_label", _fake_label)
+
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample_record(folder_path="/home/user/games/Game1", release_date="2017"))
+    db.upsert(_sample_record(folder_path="/mnt/games/Game2", release_date="2020"))
+    db.upsert(_sample_record(folder_path="/mnt/games/Game3", release_date=""))
+    db.upsert(_sample_record(folder_path="/manual/Game4", release_date="2021"))
+
+    stats = db.stats()
+    assert stats["by_disk"]["SSD"] == 1
+    assert stats["by_disk"]["Games HDD"] == 2
+    assert stats["by_disk"]["Manual"] == 1
+
+
+def test_disk_property_linux(monkeypatch):
+    """Linux disk property resolves mount-point labels instead of drive letters."""
+    from playcache import models as _models
+    _models._drive_label_cache.clear()
+
+    monkeypatch.setattr(_models.sys, "platform", "linux")
+
+    def _fake_mount(path: str) -> str:
+        if path.startswith("/home"):
+            return "/home"
+        return "/"
+
+    def _fake_label(mount: str) -> str:
+        return "Home SSD" if mount == "/home" else ""
+
+    monkeypatch.setattr(_models, "_linux_mount_for", _fake_mount)
+    monkeypatch.setattr(_models, "_volume_label", _fake_label)
+
+    rec_home = GameRecord(folder_path="/home/user/games/Hollow Knight")
+    assert rec_home.disk == "Home SSD"
+
+    rec_root = GameRecord(folder_path="/opt/games/Portal")
+    assert rec_root.disk == "/"
+
+    rec_manual = GameRecord(folder_path="/manual/My Game")
+    assert rec_manual.disk == "Manual"

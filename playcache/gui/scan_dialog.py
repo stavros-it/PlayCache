@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 
 from PySide6.QtCore import QEventLoop, QThread, Signal
 from PySide6.QtWidgets import (
@@ -124,7 +125,10 @@ class ScanDialog(QDialog):
         folder_row = QHBoxLayout()
         folder_row.addWidget(QLabel("Drive or folder:"))
         self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("e.g. D: or D:\\Games")
+        if sys.platform == "win32":
+            self.path_edit.setPlaceholderText("e.g. D: or D:\\Games")
+        else:
+            self.path_edit.setPlaceholderText("e.g. /mnt/games or ~/.steam/steam")
         folder_row.addWidget(self.path_edit, 1)
         browse_btn = QPushButton("Browse…")
         browse_btn.clicked.connect(self._browse)
