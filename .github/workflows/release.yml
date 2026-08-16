@@ -109,13 +109,16 @@ jobs:
             --output appimage \
             --desktop-file AppDir/playcache.desktop \
             --icon-file AppDir/usr/share/icons/hicolor/256x256/apps/playcache.png
-          ls -la *.AppImage
+          # Move the AppImage out of the working dir so the build tools
+          # don't get picked up by the artifact upload.
+          mkdir -p appimage-out
+          mv PlayCache-*.AppImage appimage-out/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PlayCache-linux-appimage
-          path: "*.AppImage"
+          path: "appimage-out/*.AppImage"
 
   release:
     needs: [build-windows, build-linux]
