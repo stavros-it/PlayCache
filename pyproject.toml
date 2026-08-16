@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "playcache"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Desktop GUI that scans installed game folders and catalogues them with metadata from TheGamesDB and RAWG."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -41,6 +41,10 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["playcache*"]
+
+# Single source of truth: version lives in playcache/__init__.py
+[tool.setuptools.dynamic]
+version = {attr = "playcache.__version__"}
 
 [tool.setuptools.package-data]
 playcache = ["assets/*.ico", "assets/*.png"]

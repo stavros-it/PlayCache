@@ -19,6 +19,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set version from tag
+        shell: pwsh
+        run: |
+          $tag = ${env:GITHUB_REF}.Replace('refs/tags/', '')
+          $version = $tag.TrimStart('v')
+          Write-Output "Tag: $tag  ->  Version: $version"
+          python -c "
+          import re, pathlib
+          p = pathlib.Path('playcache/__init__.py')
+          text = p.read_text(encoding='utf-8')
+          new = re.sub(r'__version__\s*=\s*[\x22\x27].*?[\x22\x27]', '__version__ = \x22$version\x22', text)
+          p.write_text(new, encoding='utf-8')
+          "
+          Get-Content playcache/__init__.py
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -36,7 +51,7 @@ jobs:
 
       - name: Create zip archive
         run: |
-          $tag = $env:GITHUB_REF -replace 'refs/tags/', ''
+          $tag = ${env:GITHUB_REF}.Replace('refs/tags/', '')
           Compress-Archive -Path dist/PlayCache/* -DestinationPath "PlayCache-$tag-windows-portable.zip" -Force
         shell: pwsh
 
@@ -55,6 +70,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          TAG=${GITHUB_REF##*/}
+          VERSION=${TAG#v}
+          echo "Tag: $TAG  ->  Version: $VERSION"
+          python -c "
+          import re, pathlib
+          p = pathlib.Path('playcache/__init__.py')
+          text = p.read_text(encoding='utf-8')
+          new = re.sub(r'__version__\s*=\s*[\"\x27].*?[\"\x27]', '__version__ = \"$VERSION\"', text)
+          p.write_text(new, encoding='utf-8')
+          "
+          cat playcache/__init__.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
