@@ -83,6 +83,17 @@ statistics dashboard.
 
 ## Quick start
 
+### Option A: Download a release (no Python required)
+
+1. Go to [Releases](https://github.com/stavros-it/PlayCache/releases)
+2. Download the latest:
+   - **Windows**: `PlayCache-vX.Y.Z-windows-portable.zip` — extract and run `PlayCache.exe`
+   - **Linux**: `PlayCache-vX.Y.Z-linux-x86_64.AppImage` — `chmod +x` and run
+3. On first launch, `config.ini` is auto-created from the bundled example.
+   Edit it and paste your free TheGamesDB API key.
+
+### Option B: Run from source
+
 ```powershell
 # 1. Install dependencies
 python -m pip install -r requirements.txt

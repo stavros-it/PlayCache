@@ -9,6 +9,10 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
+# PyInstaller
+*.spec.bak
+AppDir/
+
 # Catalog artifacts
 *.db
 *.db-journal
