@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "playcache"
 dynamic = ["version"]
-description = "Desktop GUI that scans installed game folders and catalogues them with metadata from TheGamesDB and RAWG."
+description = "A desktop catalog for every game you own. Point PlayCache at your game folders and it fetches covers, ratings, and descriptions from TheGamesDB and RAWG, then presents them in a polished dark-themed view you can search, edit, and export."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
