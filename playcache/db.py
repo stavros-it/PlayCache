@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_games_fetch_status ON games(fetch_status);
 CREATE INDEX IF NOT EXISTS idx_games_store        ON games(store);
 """
 
-# A view that mirrors Game_Library.xlsx exactly (1 row per game, ordered)
+# A view that mirrors the 6-column reference Excel layout (1 row per game, ordered)
 EXCEL_VIEW = """
 CREATE VIEW IF NOT EXISTS v_excel AS
 SELECT

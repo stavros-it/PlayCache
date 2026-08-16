@@ -1,4 +1,4 @@
-"""Export the SQLite catalog to an .xlsx file matching Game_Library.xlsx layout."""
+"""Export the SQLite catalog to an .xlsx file matching the 6-column reference layout."""
 from __future__ import annotations
 
 from pathlib import Path

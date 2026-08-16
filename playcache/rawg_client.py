@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.rawg.io/api"
 
-# Map RAWG store names to the labels used in Game_Library.xlsx
+# Map RAWG store names to the labels used in the reference Excel layout
 STORE_NAME_MAP = {
     "steam": "Steam",
     "gog": "GOG",

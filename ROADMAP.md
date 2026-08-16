@@ -17,7 +17,7 @@
 - ✅ RAWG merge step — fills numeric rating, Metacritic, cover, website after TGDB
 - ✅ ESRB age ratings from TheGamesDB (stored in `esrb_rating` column)
 - ✅ Cover images from TheGamesDB boxart (`include=boxart`) — no RAWG dependency
-- ✅ SQLite storage with `v_excel` view matching `Game_Library.xlsx`
+- ✅ SQLite storage with `v_excel` view matching the 6-column reference Excel layout
 - ✅ Manual overrides — user edits persist across rescans
 - ✅ Manual game adding — "Add Game…" toolbar button (Ctrl+N), no folder required
 - ✅ Multi-row selection (Ctrl/Shift) with bulk re-fetch and bulk delete
@@ -173,7 +173,8 @@ The functional core is solid; these make the app feel professional.
   or replace-all mode. Versioned envelope for forward/backward compat.
 - **📋 Import from existing catalog** — let users import their existing
   `Game_Library.xlsx` into the DB (currently the round-trip is only tested
-  in code, not exposed in the UI).
+  in code, not exposed in the UI). *The original `Game_Library.xlsx` reference
+  file is no longer bundled with the repo — it contained personal catalog data.*
 - **📋 Backup/restore** — a "Backup database…" menu item that copies the
   `.db` file to a timestamped path. Useful before big rescans.
 - **📋 Schema versioning** — replace the ad-hoc `_migrate()` with a proper

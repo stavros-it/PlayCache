@@ -22,7 +22,6 @@ covers/
 
 # Exported catalogs
 *.xlsx
-!Game_Library.xlsx
 
 # Editors / OS
 .vscode/

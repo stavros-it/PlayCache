@@ -8,7 +8,8 @@
 A <strong>PySide6 desktop GUI</strong> that scans a drive (or folder) of installed games,
 fetches metadata from free online services (<strong>TheGamesDB</strong> primary, <strong>RAWG</strong>
 fallback + merge), and catalogues them into a local <strong>SQLite</strong> database.
-Browse, edit, and export to Excel matching the <code>Game_Library.xlsx</code> layout.
+Browse, edit, and export to Excel with a 6-column layout
+(GAME NAME, PLATFORM, GOG / STEAM, USER RATING, GAME TYPE, SHORT DESCRIPTION).
 Ship-ready with a polished dark theme, compressed JSON backups, and a
 statistics dashboard.
 </p>
@@ -71,7 +72,7 @@ statistics dashboard.
 - **About dialog** with app info and copyright notice
 
 ### Persistence
-- **SQLite storage** with a `v_excel` view mirroring `Game_Library.xlsx`
+- **SQLite storage** with a `v_excel` view mirroring the 6-column reference layout
 - **Manual overrides** — user edits persist across rescans (JSON map per row)
 - **Manual game adding** — "Add Game…" (Ctrl+N) for games not currently installed
 - **Backup/Restore** — compressed JSON (`.json.gz`) catalog snapshots with a
@@ -206,7 +207,7 @@ playcache/
   thegamesdb_client.py    # TheGamesDB primary client; genres/devs/pubs/boxart/quota
   cataloger.py            # scan → fetch → merge → upsert orchestrator
   image_cache.py          # async Qt cover-image fetcher with disk cache
-  exporter.py             # SQLite → .xlsx matching Game_Library.xlsx
+  exporter.py             # SQLite → .xlsx (6-column reference layout)
   backup.py               # compressed JSON backup/restore (.json.gz)
   assets/                 # app.ico (multi-resolution) + app.png
   gui/                    # PySide6 GUI package

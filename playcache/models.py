@@ -38,7 +38,7 @@ class GameRecord:
     folder_name: str = ""
     folder_path: str = ""
 
-    # Catalog columns (match Game_Library.xlsx headers)
+    # Catalog columns (match the 6-column reference Excel layout)
     game_name: str = ""
     platform: str = "PC"
     store: str = ""            # "Steam" | "GOG" | "Epic" | "GOG / Steam" | "Other"
