@@ -10,13 +10,14 @@ and it fetches covers, ratings, and descriptions from <strong>TheGamesDB</strong
 (primary) and <strong>RAWG</strong> (fallback + merge), then presents them in a
 polished <strong>dark-themed</strong> view you can search, edit, and export to Excel.
 Backed by a local <strong>SQLite</strong> database with compressed JSON backups and
-a statistics dashboard.
+a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</strong>.
 </p>
 
 <p align="center">
   <a href="https://github.com/stavros-it/PlayCache/actions"><img src="https://github.com/stavros-it/PlayCache/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
   <img src="https://img.shields.io/badge/tests-119-brightgreen" alt="Tests: 119">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
 </p>
@@ -93,6 +94,7 @@ a statistics dashboard.
 
 ### Option B: Run from source
 
+**Windows (PowerShell):**
 ```powershell
 # 1. Install dependencies
 python -m pip install -r requirements.txt
@@ -105,6 +107,21 @@ notepad config.ini        # paste your key under [thegamesdb] api_key =
 python run.pyw            # no console window; logs to playcache.log
 # or
 python run.py             # console visible (useful for debugging)
+```
+
+**Linux (bash):**
+```bash
+# 1. Install dependencies
+python3 -m pip install -r requirements.txt
+
+# 2. Copy the config template and add your free TheGamesDB key
+cp config.example.ini config.ini
+${EDITOR:-nano} config.ini   # paste your key under [thegamesdb] api_key =
+
+# 3. Launch the GUI (opens maximized, sorted alphabetically)
+python3 run.pyw               # logs to playcache.log
+# or
+python3 run.py                # console visible (useful for debugging)
 ```
 
 The GUI opens with three panels: filters on the left, the games table in the
