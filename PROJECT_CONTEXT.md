@@ -12,6 +12,10 @@ local SQLite database. The data model and Excel export follow a 6-column
 reference layout (GAME NAME, PLATFORM, GOG / STEAM, USER RATING, GAME TYPE,
 SHORT DESCRIPTION).
 
+Development was led by **Stavros Antoniou** with the assistance of AI tools
+(Claude and GLM-5.2 via the OpenCode CLI). All code, tests, and docs were
+produced in collaboration with AI assistants and reviewed by the author.
+
 ### Primary user workflow
 1. Launch `python run.pyw` → the GUI opens **maximized** (stdout/stderr
    redirected to `playcache.log`). App icon shows in the window title bar,

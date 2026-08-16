@@ -271,6 +271,16 @@ ruff check playcache/ tests/ run.py run.pyw scripts/
 
 ---
 
+## Development
+
+PlayCache was developed by **Stavros Antoniou** with the assistance of AI
+tools. Code, tests, documentation, and design decisions were produced in
+collaboration with AI assistants (Claude and GLM-5.2 via the OpenCode CLI).
+All AI-generated output was reviewed and curated by the author. The project
+is the intellectual property of the author.
+
+---
+
 ## License
 
 Copyright (c) 2026 **Stavros Antoniou**. All rights reserved.
