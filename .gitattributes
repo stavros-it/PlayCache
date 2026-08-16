@@ -1,0 +1,9 @@
+# Use LF in the repo; let Git convert to CRLF on Windows checkout
+* text=auto eol=lf
+
+# Binary files — never normalize
+*.png binary
+*.ico binary
+*.xlsx binary
+*.db binary
+*.json.gz binary
