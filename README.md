@@ -18,8 +18,12 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
-  <img src="https://img.shields.io/badge/tests-119-brightgreen" alt="Tests: 119">
+  <img src="https://img.shields.io/badge/tests-134-brightgreen" alt="Tests: 134">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
+</p>
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="PlayCache GUI" width="960">
 </p>
 
 ---
@@ -250,7 +254,7 @@ playcache/
     duplicates_dialog.py  # fuzzy duplicate finder + resolver
 run.pyw                   # GUI entry point (no console, maximized)
 run.py                    # Console entry point (same app, maximized)
-tests/                    # pytest suite (119 tests)
+tests/                    # pytest suite (134 tests)
 ```
 
 ## Testing
