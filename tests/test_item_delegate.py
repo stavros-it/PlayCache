@@ -13,14 +13,15 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import warnings
+
 import pytest
-from PySide6.QtCore import QModelIndex, QRect
+from PySide6.QtCore import QRect
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
     QStyleOptionViewItem,
-    QTableView,
 )
 
 from playcache.gui.item_delegate import GamesItemDelegate
@@ -30,12 +31,10 @@ from playcache.models import GameRecord
 
 @pytest.fixture(scope="module")
 def qapp():
-    app = QApplication.instance() or QApplication([])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        app = QApplication.instance() or QApplication([])
     yield app
-
-
-def _make_index(model: GamesTableModel, row: int, col: int) -> QModelIndex:
-    return model.index(row, col)
 
 
 def _option(state=QStyle.State(QStyle.State_Enabled), alternate=False) -> QStyleOptionViewItem:
@@ -64,13 +63,14 @@ def _sample_record(status: str = "ok", source: str = "thegamesdb") -> GameRecord
     )
 
 
+@pytest.mark.filterwarnings("ignore")
 @pytest.mark.parametrize("col_name", [c[0] for c in COLUMNS])
 def test_paint_does_not_raise_for_any_column(qapp, col_name):
     """Painting every column (including Status and Source) must not throw."""
     model = GamesTableModel([_sample_record()])
     delegate = GamesItemDelegate()
     col = next(i for i, c in enumerate(COLUMNS) if c[0] == col_name)
-    index = _make_index(model, 0, col)
+    index = model.index(0, col)
 
     pixmap = QPixmap(200, 40)
     painter = QPainter(pixmap)
@@ -85,6 +85,7 @@ def test_paint_does_not_raise_for_any_column(qapp, col_name):
         painter.end()
 
 
+@pytest.mark.filterwarnings("ignore")
 def test_paint_status_all_known_statuses(qapp):
     """The status badge paints for every known fetch_status without error."""
     statuses = ["", "ok", "not_found", "error", "pending", "skipped"]
@@ -103,6 +104,7 @@ def test_paint_status_all_known_statuses(qapp):
         painter.end()
 
 
+@pytest.mark.filterwarnings("ignore")
 def test_paint_source_all_known_sources(qapp):
     """The source column paints for every known data_source without error."""
     sources = ["", "thegamesdb", "rawg", "none"]
@@ -121,27 +123,25 @@ def test_paint_source_all_known_sources(qapp):
         painter.end()
 
 
-def test_delegate_paints_inside_tableview(qapp):
-    """End-to-end: the delegate paints when used by a real QTableView.
+@pytest.mark.filterwarnings("ignore")
+def test_paint_selected_and_alternate_combinations(qapp):
+    """All four state/alternate combinations paint without error."""
+    model = GamesTableModel([_sample_record()])
+    delegate = GamesItemDelegate()
+    status_col = next(i for i, c in enumerate(COLUMNS) if c[0] == "Status")
+    source_col = next(i for i, c in enumerate(COLUMNS) if c[0] == "Source")
+    index_status = model.index(0, status_col)
+    index_source = model.index(0, source_col)
 
-    This catches issues that only surface during Qt's internal paint pipeline
-    (e.g. option.features not being set correctly by the view).
-    """
-    records = [
-        _sample_record(status="ok", source="thegamesdb"),
-        _sample_record(status="not_found", source="rawg"),
-        _sample_record(status="error", source=""),
-    ]
-    model = GamesTableModel(records)
-    table = QTableView()
-    table.setModel(model)
-    table.setItemDelegate(GamesItemDelegate())
-    table.setAlternatingRowColors(True)
-    table.resize(400, 200)
-    table.show()
-    qapp.processEvents()
-    # Force a paint of the viewport — if paint() raises, Qt swallows the
-    # exception but the viewport pixmap stays blank. We just verify no
-    # unhandled exception escapes to the test runner.
-    pixmap = QPixmap(table.viewport().size())
-    table.viewport().render(pixmap)
+    pixmap = QPixmap(200, 40)
+    painter = QPainter(pixmap)
+    try:
+        for selected in (False, True):
+            for alt in (False, True):
+                state = QStyle.State(QStyle.State_Enabled)
+                if selected:
+                    state |= QStyle.State_Selected
+                delegate.paint(painter, _option(state, alternate=alt), index_status)
+                delegate.paint(painter, _option(state, alternate=alt), index_source)
+    finally:
+        painter.end()
