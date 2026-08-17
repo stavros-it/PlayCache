@@ -72,7 +72,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 121 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 134 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -133,10 +133,11 @@ Game DB/
     ├── test_db.py                    # 8 tests (upsert + stats distributions + overrides)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_manual_overrides.py      # 10 tests + schema migration
+    ├── test_item_delegate.py         # 13 tests — paint regression for PySide6 6.x enums
     └── test_backup.py               # 16 tests (compressed JSON round-trip)
 ```
 
-**Total**: ~5,881 LOC source + ~1,500 LOC tests = ~7,381 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,196 LOC source + ~1,366 LOC tests = ~6,562 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -312,7 +313,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 121 passing).
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 134 passing).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)
@@ -427,6 +428,13 @@ git push --tags
   inserted before Status (col 9) or Source (col 8) in `COLUMNS`, the
   `_STATUS_COL` / `_SOURCE_COL` constants in `item_delegate.py` must be updated
   to match.
+- **PySide6 6.x enum scoping** — `QStyleOptionViewItem.State_Selected` and
+  `State_Alternate` were removed in PySide6 6.x (they were Qt5-era shortcuts).
+  The delegate now uses `QStyle.State_Selected` (via `option.state`) and
+  `QStyleOptionViewItem.ViewItemFeature.Alternate` (via `option.features`).
+  Before this fix, `paint()` raised `AttributeError` on every Status/Source
+  cell; the swallowed exceptions prevented the viewport from repainting after
+  deletes/edits, making it look like the table never updated.
 - **Default sort is alphabetical by Game** — `sortByColumn(0, AscendingOrder)`
   is applied after `setSortingEnabled(True)`. The proxy's `lessThan` for the
   Game column is case-insensitive with a stable tiebreak by source row. If the

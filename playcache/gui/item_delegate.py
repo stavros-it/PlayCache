@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QModelIndex, QRect, Qt
 from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import QStyleOptionViewItem, QStyledItemDelegate
+from PySide6.QtWidgets import QStyle, QStyleOptionViewItem, QStyledItemDelegate
 
 from .theme import (
     BG_CARD_ALT,
@@ -68,8 +68,8 @@ class GamesItemDelegate(QStyledItemDelegate):
 
         rect = option.rect
         # Check if this row is selected (for background)
-        is_selected = bool(option.state & QStyleOptionViewItem.State_Selected)
-        is_alternate = bool(option.state & QStyleOptionViewItem.State_Alternate)
+        is_selected = bool(option.state & QStyle.State_Selected)
+        is_alternate = bool(option.features & QStyleOptionViewItem.ViewItemFeature.Alternate)
 
         # Draw the cell background (zebra or selected)
         painter.save()
@@ -114,8 +114,8 @@ class GamesItemDelegate(QStyledItemDelegate):
         """Render the Source column with a subtle colored text."""
         source = index.data(Qt.ItemDataRole.DisplayRole) or ""
         rect = option.rect
-        is_selected = bool(option.state & QStyleOptionViewItem.State_Selected)
-        is_alternate = bool(option.state & QStyleOptionViewItem.State_Alternate)
+        is_selected = bool(option.state & QStyle.State_Selected)
+        is_alternate = bool(option.features & QStyleOptionViewItem.ViewItemFeature.Alternate)
 
         painter.save()
         # Background
