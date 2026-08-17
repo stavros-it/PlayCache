@@ -17,16 +17,23 @@ import warnings
 
 import pytest
 from PySide6.QtCore import QRect
-from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
     QStyleOptionViewItem,
 )
 
+try:
+    from PySide6.QtGui import QPainter, QPixmap
+    _HAS_QTGUI = True
+except ImportError:
+    _HAS_QTGUI = False
+
 from playcache.gui.item_delegate import GamesItemDelegate
 from playcache.gui.table_model import COLUMNS, GamesTableModel
 from playcache.models import GameRecord
+
+pytestmark = pytest.mark.skipif(not _HAS_QTGUI, reason="PySide6 QtGui unavailable (no OpenGL libs)")
 
 
 @pytest.fixture(scope="module")
