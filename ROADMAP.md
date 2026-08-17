@@ -65,7 +65,7 @@
 - ✅ Cross-platform support (Windows + Linux) — scanner detects Linux system
   folders and ELF/AppImage/.sh executables; volume labels resolved via
   `/proc/mounts`; `.desktop` file generation on Linux
-- ✅ 121 tests passing, ruff clean
+- ✅ 134 tests passing, ruff clean
 
 ## Priorities
 
@@ -242,6 +242,36 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-08-18 — Fix table not updating after delete (PySide6 6.x enum scoping)
+
+**Symptom**: user scanned a single game folder and got one row per subfolder
+(`Binaries`, `Engine`, `ROTTGame`, `__support`). Right-click → Delete →
+confirm, and the rows appeared to stay. The DB was actually updated, but the
+table viewport never repainted.
+
+**Root cause**: `GamesItemDelegate.paint()` referenced
+`QStyleOptionViewItem.State_Selected` and `QStyleOptionViewItem.State_Alternate`.
+Both were Qt5-era shortcuts that PySide6 6.x removed (enums are now proper
+PEP 435 scoped enums). Every paint of the Status (col 9) or Source (col 8)
+cell raised `AttributeError`; PySide6 swallowed it to stderr (→
+`playcache.log` under `run.pyw`), but the viewport's paint cycle was aborted,
+so the table showed stale pixels after any model reset (delete, edit,
+rescan).
+
+**Fix**:
+- `option.state & QStyleOptionViewItem.State_Selected` →
+  `option.state & QStyle.State_Selected` (the `state` field is a
+  `QStyle.State` flag set).
+- `option.state & QStyleOptionViewItem.State_Alternate` →
+  `option.features & QStyleOptionViewItem.ViewItemFeature.Alternate`
+  (the alternate-row flag moved to `option.features` in Qt6; `QStyle.State`
+  no longer has `State_Alternate`).
+
+**Regression test**: `tests/test_item_delegate.py` (13 tests) paints every
+column with selected / alternate / normal option states and asserts no
+exception escapes. Runs headless via `QT_QPA_PLATFORM=offscreen` (already
+set in CI).
 
 ### 2026-08-16 — Single-source versioning across app + repo + releases
 Before this change, `1.0.0` appeared in two places: `playcache/__init__.py`
