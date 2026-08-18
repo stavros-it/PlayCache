@@ -11,6 +11,7 @@ from PySide6.QtCore import QModelIndex, QRect, Qt
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import QStyle, QStyleOptionViewItem, QStyledItemDelegate
 
+from .table_model import COLUMNS
 from .theme import (
     BG_CARD_ALT,
     BG_SELECTED,
@@ -20,9 +21,14 @@ from .theme import (
     contrast_text,
 )
 
-# Column index of "Status" in the table (must match COLUMNS in table_model.py)
-_STATUS_COL = 9
-_SOURCE_COL = 8
+_STATUS_COL = next(i for i, (h, _, _) in enumerate(COLUMNS) if h == "Status")
+_SOURCE_COL = next(i for i, (h, _, _) in enumerate(COLUMNS) if h == "Source")
+
+
+_SOURCE_COLORS = {
+    "thegamesdb": "#818CF8",
+    "rawg": "#38BDF8",
+}
 
 
 def _status_color(status: str) -> str:
@@ -81,7 +87,7 @@ class GamesItemDelegate(QStyledItemDelegate):
             painter.fillRect(rect, QColor(BG_WINDOW))
 
         # Draw the badge: a rounded rect inside the cell with padding
-        badge_h = min(rect.height() - 8, 20)
+        badge_h = max(0, min(rect.height() - 8, 20))
         badge_w = min(rect.width() - 12, 90)
         badge_x = rect.x() + (rect.width() - badge_w) // 2
         badge_y = rect.y() + (rect.height() - badge_h) // 2
@@ -126,12 +132,7 @@ class GamesItemDelegate(QStyledItemDelegate):
         else:
             painter.fillRect(rect, QColor(BG_WINDOW))
 
-        # Source-specific muted color
-        source_colors = {
-            "thegamesdb": "#818CF8",   # indigo-400
-            "rawg": "#38BDF8",          # sky-400
-        }
-        text_color = QColor(source_colors.get(source, TEXT_PRIMARY))
+        text_color = QColor(_SOURCE_COLORS.get(source, TEXT_PRIMARY))
 
         painter.setPen(text_color)
         font = QFont()

@@ -5,7 +5,6 @@ import json
 import os
 import sqlite3
 import sys
-from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -80,12 +79,16 @@ class Database:
 
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=15)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON;")
         try:
+            conn.execute("PRAGMA foreign_keys = ON;")
+            conn.execute("PRAGMA busy_timeout = 15000;")
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -122,7 +125,6 @@ class Database:
         values = [row[c] for c in COLUMNS]
         placeholders = ",".join(["?"] * len(COLUMNS))
         col_list = ",".join(COLUMNS)
-        # Refresh updated_at via excluded (defaults to datetime('now') on insert)
         update_list = ",".join(
             [f"{c}=excluded.{c}" for c in COLUMNS] + ["updated_at=datetime('now')"]
         )
@@ -134,6 +136,39 @@ class Database:
             cur = conn.execute(sql, values)
             return cur.rowcount > 0
 
+    def upsert_many(
+        self, records: list[GameRecord], *, replace_all: bool = False
+    ) -> int:
+        """Upssert every record in a single transaction.
+
+        If ``replace_all`` is True, all existing rows are deleted first
+        (in the same transaction). Returns the number of rows upserted.
+        A crash or exception rolls back the entire operation, so the
+        existing catalog is never left half-written.
+        """
+        if not records:
+            if replace_all:
+                with self.connect() as conn:
+                    conn.execute("DELETE FROM games;")
+            return 0
+        placeholders = ",".join(["?"] * len(COLUMNS))
+        col_list = ",".join(COLUMNS)
+        update_list = ",".join(
+            [f"{c}=excluded.{c}" for c in COLUMNS] + ["updated_at=datetime('now')"]
+        )
+        sql = (
+            f"INSERT INTO games ({col_list}) VALUES ({placeholders}) "
+            f"ON CONFLICT(folder_path) DO UPDATE SET {update_list};"
+        )
+        rows = [r.to_db_row() for r in records]
+        values_batch = [[row[c] for c in COLUMNS] for row in rows]
+        with self.connect() as conn:
+            if replace_all:
+                conn.execute("DELETE FROM games;")
+            conn.executemany(sql, values_batch)
+        return len(records)
+
+
     def get_by_path(self, folder_path: str) -> GameRecord | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -141,7 +176,7 @@ class Database:
             ).fetchone()
         return GameRecord.from_row(dict(row)) if row else None
 
-    def all_records(self) -> Iterable[GameRecord]:
+    def all_records(self) -> list[GameRecord]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM games ORDER BY COALESCE(NULLIF(game_name,''), folder_name);"

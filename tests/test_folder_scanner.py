@@ -73,6 +73,21 @@ class TestCleanFolderName:
         # But years in parentheses/brackets are still stripped
         assert "2020" not in clean_folder_name("Some Game (2020)")
 
+    def test_preserves_intra_word_hyphens(self):
+        assert clean_folder_name("Half-Life") == "Half-Life"
+        assert clean_folder_name("Counter-Strike") == "Counter-Strike"
+
+    def test_strips_hyphenated_noise_tokens(self):
+        out = clean_folder_name("Doom Eternal-CODEX")
+        assert "codex" not in out.lower()
+        assert "Doom Eternal" in out
+
+    def test_strips_online_fix_token(self):
+        out = clean_folder_name("Some Game online-fix")
+        assert "online" not in out.lower()
+        assert "fix" not in out.lower()
+        assert "Some Game" in out
+
 
 class TestCleanExeName:
     def test_camelcase(self):
@@ -186,6 +201,24 @@ class TestSmartDetectGameName:
         cleaned = clean_folder_name(folder.name)
         result = smart_detect_game_name(folder, cleaned)
         assert result == "Aphelion"
+
+    def test_gog_prefers_base_game_over_dlc(self, tmp_path):
+        """When multiple goggame-*.info files exist, the base game (where
+        filename ID == JSON gameId) is preferred over DLC/soundtrack entries."""
+        import json
+        folder = tmp_path / "game_folder"
+        folder.mkdir()
+        # DLC file (filename ID 99999, gameId 88888 — not the base game)
+        (folder / "goggame-99999.info").write_text(
+            json.dumps({"name": "Game Soundtrack", "gameId": "88888"})
+        )
+        # Base game file (filename ID 88888 == gameId 88888)
+        (folder / "goggame-88888.info").write_text(
+            json.dumps({"name": "Real Game", "gameId": "88888"})
+        )
+        cleaned = clean_folder_name(folder.name)
+        result = smart_detect_game_name(folder, cleaned)
+        assert result == "Real Game"
 
     def test_uses_steam_manifest(self, tmp_path):
         """Read game name from Steam appmanifest_*.acf."""

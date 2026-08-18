@@ -9,6 +9,17 @@ from pathlib import Path
 _drive_label_cache: dict[str, str] = {}
 _mount_cache: list[tuple[str, str, str]] | None = None
 
+_INT_FIELDS = {"rawg_id", "thegamesdb_id", "metacritic_score"}
+
+
+def clear_volume_label_cache() -> None:
+    """Clear the cached volume labels.
+
+    Call this when a drive may have been swapped (e.g. USB hot-plug) so the
+    next ``disk`` / ``stats()`` call re-queries the OS for fresh labels.
+    """
+    _drive_label_cache.clear()
+
 
 def _load_mounts() -> list[tuple[str, str, str]]:
     """Read /proc/mounts and return [(device, mount_point, fs_type), ...].
@@ -166,7 +177,8 @@ class GameRecord:
         """Display name of the disk/drive this game lives on.
 
         - **Windows**: returns the volume label (e.g. ``"TOSHIBA 2TB"``) when
-          available, falling back to the drive letter (``"D:"``).
+          available, falling back to the drive letter (``"D:"``). UNC paths
+          (``\\\\server\\share\\...``) are grouped by ``\\\\server\\share``.
         - **Linux**: returns the filesystem label or device name for the mount
           point containing the path (e.g. ``"nvme0n1p2"`` or ``"Games"``).
           Falls back to the mount point (e.g. ``/mnt/games``).
@@ -176,12 +188,16 @@ class GameRecord:
         if not path or path.startswith("/manual/"):
             return "Manual"
         if sys.platform == "win32":
-            drive = os.path.splitdrive(path)[0]
-            if not drive:
-                return "—"
-            root = f"{drive}{os.sep}"
-            label = _volume_label(root)
-            return label or drive
+            drive, _ = os.path.splitdrive(path)
+            if drive:
+                root = f"{drive}{os.sep}"
+                label = _volume_label(root)
+                return label or drive
+            if path.startswith("\\\\"):
+                parts = path.split(os.sep)
+                if len(parts) >= 4 and parts[2]:
+                    return f"\\\\{parts[2]}\\{parts[3]}"
+            return "—"
         mount = _linux_mount_for(path)
         label = _volume_label(mount)
         return label or mount
@@ -215,6 +231,22 @@ class GameRecord:
 
     @classmethod
     def from_row(cls, row: dict) -> GameRecord:
-        """Build a record from a DB row dict (ignores unknown keys)."""
+        """Build a record from a DB row dict (ignores unknown keys).
+
+        Coerces known integer fields (``rawg_id``, ``thegamesdb_id``,
+        ``metacritic_score``) to ``int | None`` so SQLite's dynamic typing
+        can't silently store a string where an int is expected.
+        """
         valid = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in row.items() if k in valid})
+        kwargs: dict = {}
+        for k, v in row.items():
+            if k not in valid:
+                continue
+            if k in _INT_FIELDS and v is not None:
+                try:
+                    kwargs[k] = int(v)
+                except (TypeError, ValueError):
+                    kwargs[k] = None
+            else:
+                kwargs[k] = v
+        return cls(**kwargs)

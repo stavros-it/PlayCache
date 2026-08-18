@@ -5,6 +5,7 @@ import json
 import logging
 
 from .config import Config
+from .db import COLUMNS as _COLUMNS
 from .db import Database
 from .folder_scanner import ScannedFolder, scan_games
 from .models import GameRecord
@@ -97,17 +98,15 @@ class Cataloger:
                         # Preserve manual overrides from the old entry before
                         # deleting it, so user edits migrate to the new path.
                         conflict_overrides = self.db.get_overrides(conflict.folder_path)
-                        with self.db.connect() as conn:
-                            conn.execute(
-                                "DELETE FROM games WHERE folder_path = ?;",
-                                (conflict.folder_path,),
-                            )
+                        conflict_path_to_delete = conflict.folder_path
                         log.info("Replaced '%s' on %s with copy on %s",
                                  record.game_name, conflict.disk, record.disk)
                     else:
                         conflict_overrides = None
+                        conflict_path_to_delete = None
                 else:
                     conflict_overrides = None
+                    conflict_path_to_delete = None
 
                 # Decide whether we need to fetch
                 existing = existing_path
@@ -148,7 +147,30 @@ class Cataloger:
                 if not record.store:
                     record.store = "Other"
 
-                self.db.upsert(record)
+                # If replacing a conflict entry, do DELETE + upsert in one
+                # transaction so a crash can't lose the old entry without
+                # storing the new one.
+                if conflict_path_to_delete:
+                    with self.db.connect() as conn:
+                        conn.execute(
+                            "DELETE FROM games WHERE folder_path = ?;",
+                            (conflict_path_to_delete,),
+                        )
+                        row = record.to_db_row()
+                        values = [row[c] for c in _COLUMNS]
+                        placeholders = ",".join(["?"] * len(_COLUMNS))
+                        col_list = ",".join(_COLUMNS)
+                        update_list = ",".join(
+                            [f"{c}=excluded.{c}" for c in _COLUMNS]
+                            + ["updated_at=datetime('now')"]
+                        )
+                        sql = (
+                            f"INSERT INTO games ({col_list}) VALUES ({placeholders}) "
+                            f"ON CONFLICT(folder_path) DO UPDATE SET {update_list};"
+                        )
+                        conn.execute(sql, values)
+                else:
+                    self.db.upsert(record)
                 summary["stored"] += 1
 
                 if progress:

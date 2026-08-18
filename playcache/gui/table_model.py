@@ -52,7 +52,8 @@ class GamesTableModel(QAbstractTableModel):
             idx = self.index(row, 0)
             bottom_right = self.index(row, len(COLUMNS) - 1)
             self.dataChanged.emit(idx, bottom_right, [Qt.ItemDataRole.DisplayRole,
-                                                      Qt.ItemDataRole.EditRole])
+                                                      Qt.ItemDataRole.EditRole,
+                                                      Qt.ItemDataRole.ToolTipRole])
 
     # ------------------------------------------------------------------ #
     # QAbstractTableModel interface

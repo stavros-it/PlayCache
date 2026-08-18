@@ -65,7 +65,7 @@
 - ✅ Cross-platform support (Windows + Linux) — scanner detects Linux system
   folders and ELF/AppImage/.sh executables; volume labels resolved via
   `/proc/mounts`; `.desktop` file generation on Linux
-- ✅ 134 tests passing, ruff clean
+- ✅ 164 tests passing, ruff clean
 
 ## Priorities
 
@@ -242,6 +242,171 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-08-18 — Full-codebase audit: atomicity, injection, and crash fixes
+
+**Trigger**: user requested a full code audit with bug fixes and
+improvements. Four parallel explore agents covered the data layer
+(`db.py`, `models.py`, `backup.py`, `config.py`), API clients
+(`rawg_client.py`, `thegamesdb_client.py`, `cataloger.py`), scanner/utils
+(`folder_scanner.py`, `textutils.py`, `exporter.py`, `image_cache.py`),
+and all GUI modules.
+
+**Critical / high-severity fixes**:
+- **Backup atomicity** (`backup.py`): export now writes to a `.tmp` file,
+  `fsync`s, and atomically renames — a crash or disk-full can no longer leave
+  a corrupt-looking `.json.gz`. `replace_all=True` import now does
+  `DELETE` + all upserts in a **single transaction** via the new
+  `Database.upsert_many()` — a crash mid-restore rolls back and the existing
+  catalog is preserved (previously the DB was wiped before any upsert).
+- **Cataloger conflict-replace atomicity** (`cataloger.py`): when resolving a
+  same-name conflict on a different disk with "Keep new", the `DELETE` of
+  the old row and the `upsert` of the new row now run in one transaction —
+  a crash can no longer lose the old entry without storing the new one.
+- **GOG base-game selection** (`folder_scanner.py:_read_gog_metadata`):
+  the "prefer base game" condition was a logical contradiction
+  (`gid == cid ... if cid != gid`) and never fired; it always returned the
+  first candidate (often a DLC/soundtrack). Now stores `(file_id, game_id,
+  name)` tuples and returns the entry where `file_id == game_id`.
+- **Excel formula injection** (`exporter.py`): game names / descriptions
+  from external APIs that start with `=`, `+`, `-`, or `@` are now prefixed
+  with `'` so Excel/LibreOffice treat them as text, not formulas. This
+  prevents DDE-based command execution from a malicious API response.
+- **Image cache `file://` rejection** (`image_cache.py`): non-`http(s)://`
+  URLs are now rejected before `QNetworkAccessManager.get()`, preventing
+  local-file reads via a malicious `cover_url` in an API response. Cache
+  writes are now atomic (`.tmp` + `os.replace`). `clear()` now uses
+  `rglob("*")` so subdirectories are also cleaned.
+- **`clean_folder_name` hyphen preservation** (`folder_scanner.py`):
+  intra-word hyphens are now preserved (`Half-Life`, `Counter-Strike`),
+  while noise tokens attached by hyphens (`Doom Eternal-CODEX`) are still
+  stripped. Previously the function split on ALL hyphens, destroying
+  hyphenated game titles.
+- **Store detection false positives** (`folder_scanner.py`): the overly
+  broad `\bgog\b`, `\bepic\b`, `\borigin\b` patterns matched game folders
+  *named* "Epic" or "Origin". Tightened to require a path separator after
+  the store name (`\bgog\b[\\/]`) or a multi-word library root
+  (`epic games[\\/]+`).
+- **Detail panel "Re-fetch" button** (`detail_panel.py`): the button was
+  created with `setEnabled(False)` and never enabled — the "Re-fetch"
+  button in the detail panel was permanently dead. Now enabled/disabled
+  alongside the other action buttons in `_set_enabled`.
+- **`esrb_rating` / `metacritic_score` editability** (`detail_panel.py`):
+  these fields were marked editable in the detail panel form but are NOT
+  in `db.EDITABLE_COLUMNS`, so every Save attempt raised
+  `ValueError("Field 'metacritic_score' is not editable")`. Moved to the
+  read-only metadata section.
+- **`ScanWorker.finished` signal shadowing** (`scan_dialog.py`): the
+  custom `finished = Signal(dict)` shadowed `QThread.finished`, so
+  `deleteLater` (connected to the built-in `finished`) never fired on the
+  exception path — leaking the worker. Renamed to `result`.
+- **Detached scan worker parenting** (`scan_dialog.py:_on_close`): when
+  the worker didn't stop within 3 s, the previous code left it parented
+  to the dialog — destroying the dialog on `exec()` return would destroy
+  a still-running `QThread` (Qt abort). Now calls `setParent(None)` before
+  detaching so the worker can self-delete via `finished → deleteLater`.
+- **`closeEvent` worker cleanup** (`main_window.py`): increased wait to
+  5 s and added `terminate()` + `wait(2000)` as a last resort so closing
+  the window can't trigger "QThread: Destroyed while still running".
+- **Single-row refetch concurrency guard** (`main_window.py`): the
+  single-row path bypassed the `_refetch_worker.isRunning()` guard, racing
+  on `requests.Session` and `self._db` with an in-flight multi-row refetch.
+  Guard is now hoisted above the branch.
+- **`_select_by_folder_path` clear-selection** (`main_window.py`): in
+  `ExtendedSelection` mode, `selectRow()` *adds* to the selection. After
+  "Add Game", the detail panel showed a stale (top-most) row. Now calls
+  `clearSelection()` first.
+- **`sqlite3.Error` handling** (`main_window.py:_on_field_edited`,
+  `detail_panel.py:_save`): both slots only caught `ValueError`/`OSError`,
+  so a "database is locked" error during a concurrent refetch would crash
+  the GUI thread. Now catches `Exception` broadly with a log warning.
+- **Env-var API key leak** (`settings_dialog.py`): if `RAWG_API_KEY` was
+  set via environment variable, the Settings dialog pre-filled the field
+  with the env value and Save wrote it to `config.ini` — a secret leak.
+  Now detects env-var-sourced keys, disables the field with a placeholder,
+  and preserves the env value (doesn't write it to disk).
+- **UNC path disk grouping** (`models.py:GameRecord.disk`): UNC paths
+  (`\\server\share\...`) returned `"—"` because `os.path.splitdrive`
+  returns an empty drive for them. Now extracts `\\server\share` as the
+  grouping key.
+- **`from_row` int coercion** (`models.py`): `rawg_id`, `thegamesdb_id`,
+  and `metacritic_score` are now coerced to `int | None` so SQLite's
+  dynamic typing can't silently store a string where an int is expected.
+- **Volume-label cache invalidation** (`models.py`): added
+  `clear_volume_label_cache()` so tests (and future hot-swap handling) can
+  invalidate the module-level `_drive_label_cache` without reaching into
+  private state.
+- **`db.connect()` rollback** (`db.py`): added explicit `rollback()` on
+  exception (previously relied on SQLite's implicit rollback-on-close,
+  which is fragile if `isolation_level` ever changes). Added
+  `PRAGMA busy_timeout = 15000` so concurrent access doesn't immediately
+  fail with "database is locked".
+- **`textutils.format_rating` NaN/Inf/range** (`textutils.py`):
+  `float("nan")` produced `"nan/10"`; `format_rating(85.0)` produced
+  `"85/10"`. Now rejects non-finite values and values > 10.
+- **`textutils.truncate(max_chars<=0)`** (`textutils.py`):
+  `truncate("hello", 0)` produced `"…"`; `truncate("hello", -1)` produced
+  `"hell…"`. Now returns `""` for non-positive `max_chars`.
+- **`textutils.clean_search_query` em-dash** (`textutils.py`): the
+  subtitle-stripping regex handled `-` and en-dash `–` but not em-dash
+  `—`. Now handles all three.
+- **`best_match` short-query false positives** (`textutils.py`): the
+  substring boost (score → 90) fired for any substring match, so a
+  3-letter query like "the" matched almost everything. Now requires
+  `len(query) >= 3`.
+- **Config BOM handling** (`config.py`): `parser.read(..., encoding="utf-8")`
+  didn't strip a UTF-8 BOM, so a `config.ini` saved as "UTF-8 with BOM"
+  (common on Windows Notepad) silently failed to parse — the API key was
+  invisible and the user got `APIKeyMissingError`. Now uses
+  `utf-8-sig`.
+- **Config env-var TOCTOU** (`config.py`): `if os.getenv(k): return
+  os.environ[k]` called `getenv` twice; consolidated to one call.
+- **`item_delegate` column constants** (`item_delegate.py`):
+  `_STATUS_COL = 9` / `_SOURCE_COL = 8` were hardcoded and would silently
+  break if `COLUMNS` changed. Now derived from `COLUMNS` at import time
+  (raises immediately if the column is missing instead of silently painting
+  the wrong column).
+- **`item_delegate` source-color dict** (`item_delegate.py`): the
+  per-call dict allocation in `_paint_source` is now module-scoped.
+- **`item_delegate` badge height** (`item_delegate.py`):
+  `badge_h = min(rect.height() - 8, 20)` could go negative for very short
+  cells; now clamped to `>= 0`.
+- **`table_model.update_record` tooltip** (`table_model.py`): the
+  `dataChanged` signal didn't include `ToolTipRole`, so the tooltip
+  (which shows `fetch_message`) was stale after a refetch until a full
+  reset. Now includes it.
+- **`exporter` error handling** (`exporter.py`): only `PermissionError`
+  was caught; `IsADirectoryError`, disk-full, etc. propagated as raw
+  exceptions. Now catches `OSError` broadly with a contextual message.
+  Column widths are now keyed by header name (dict) instead of position
+  (list), so adding/reordering headers can't silently misalign widths.
+  `auto_filter` is no longer set on an empty sheet.
+
+**New tests** (30 added, 134 → 164 total):
+- `test_folder_scanner.py`: GOG base-game preference, hyphen preservation,
+  online-fix stripping.
+- `test_backup.py`: atomic export (no `.tmp` left), non-string folder_path
+  rejection, `replace_all` atomicity.
+- `test_exporter.py` (new): formula injection sanitization (`=`, `+`, `@`),
+  normal names unmodified, empty DB, parent dir creation, permission error.
+- `test_db.py`: `upsert_many` batch insert / replace_all / empty list,
+  UNC path disk grouping, `from_row` int coercion + invalid handling.
+- `test_textutils.py`: NaN/Inf/over-10 ratings, `truncate(max_chars<=0)`,
+  em-dash subtitle stripping.
+
+**Trade-offs considered**:
+- Atomic backup write adds a `.tmp` file briefly during export. On
+  cross-device writes `os.replace` may fail — handled by falling back to
+  a plain `OSError` with context.
+- `upsert_many` materializes all records in memory before the
+  `executemany`. For very large catalogs (100k+) this could be split into
+  batches, but the simplicity is worth it for now.
+- The env-var API key detection in Settings uses `os.getenv` at dialog
+  open time; if the env var is set/cleared while the dialog is open, the
+  field state won't update. Acceptable for a modal dialog.
+- Catching `Exception` broadly in GUI slots masks programming errors. The
+  alternative (crash the GUI on a locked DB) is worse for users. Logging
+  at WARNING level preserves debuggability.
 
 ### 2026-08-18 — Fix table not updating after delete (PySide6 6.x enum scoping)
 

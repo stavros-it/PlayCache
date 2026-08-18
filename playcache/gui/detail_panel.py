@@ -34,24 +34,24 @@ FIELDS = [
     ("Platform",        "platform",          "text"),
     ("Store",          "store",             "text"),
     ("Rating",         "user_rating",       "text"),
-    ("ESRB",           "esrb_rating",       "text"),
     ("Type",           "game_type",         "text"),
     ("Release date",   "release_date",      "text"),
     ("Developer",      "developer",         "text"),
     ("Publisher",      "publisher",         "text"),
     ("Website",        "website",           "text"),
-    ("Metacritic",     "metacritic_score",  "number"),
     ("Description",    "short_description", "longtext"),
 ]
 
 READONLY_FIELDS = [
     ("Folder",         "folder_name",       None),
     ("Path",           "folder_path",        None),
+    ("ESRB",           "esrb_rating",        None),
+    ("Metacritic",     "metacritic_score",  None),
     ("RAWG ID",        "rawg_id",            None),
-    ("TheGamesDB ID",  "thegamesdb_id",      None),
+    ("TheGamesDB ID",  "thegamesdb_id",     None),
     ("Source",         "data_source",        None),
     ("Status",         "fetch_status",       None),
-    ("Message",        "fetch_message",      None),
+    ("Message",        "fetch_message",     None),
 ]
 
 
@@ -65,6 +65,7 @@ class DetailPanel(QWidget):
         self._model = model
         self._image_cache = image_cache
         self._record: GameRecord | None = None
+        self._row: int = -1
         self._current_url: str = ""
 
         layout = QVBoxLayout(self)
@@ -236,14 +237,14 @@ class DetailPanel(QWidget):
                 else:
                     ok = False
                     failed.append(attr)
-            except ValueError as e:
-                QMessageBox.warning(self, "Cannot edit field", str(e))
+            except ValueError:
                 ok = False
                 failed.append(attr)
-                # Don't break — try the remaining fields so the user gets as
-                # many saved as possible, then report which failed.
+            except Exception as e:
+                log.warning("DB error saving %s.%s: %s", self._record.folder_path, attr, e)
+                ok = False
+                failed.append(attr)
 
-        # Reflect successfully-saved changes on the in-memory record + table model
         for attr in succeeded:
             setattr(self._record, attr, changes[attr])
         if succeeded and self._row >= 0:
@@ -257,8 +258,11 @@ class DetailPanel(QWidget):
                 f"Saved {len(succeeded)} field(s), but failed to save: "
                 f"{', '.join(failed)}.",
             )
-        # If nothing succeeded, the per-field warning(s) above already told the
-        # user what went wrong; no additional message needed.
+        else:
+            QMessageBox.warning(
+                self, "Save failed",
+                f"Could not save any fields. Failed: {', '.join(failed)}.",
+            )
 
     def _open_website(self) -> None:
         if self._record and self._record.website:
@@ -278,5 +282,6 @@ class DetailPanel(QWidget):
         for w in self._inputs.values():
             w.setEnabled(enabled)
         self.save_btn.setEnabled(enabled)
+        self.refetch_btn.setEnabled(enabled)
         self.website_btn.setEnabled(enabled and bool(self._record and self._record.website))
         self.youtube_btn.setEnabled(enabled and bool(self._record))

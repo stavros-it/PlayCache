@@ -32,10 +32,10 @@ log = logging.getLogger(__name__)
 class ScanWorker(QThread):
     """Runs Cataloger.scan_to_db off the GUI thread."""
 
-    progress = Signal(int, int, str)        # idx, total, message
-    finished = Signal(dict)                  # summary
-    failed = Signal(str)                     # error message
-    conflict = Signal(object, object)        # new_record, existing_record
+    progress = Signal(int, int, str)
+    result = Signal(dict)
+    failed = Signal(str)
+    conflict = Signal(object, object)
 
     def __init__(
         self,
@@ -99,9 +99,9 @@ class ScanWorker(QThread):
                 progress=on_progress,
                 conflict_handler=on_conflict,
             )
-            self.finished.emit(summary)
+            self.result.emit(summary)
         except InterruptedError:
-            self.finished.emit({"cancelled": True})
+            self.result.emit({"cancelled": True})
         except Exception as e:
             log.exception("Scan failed")
             self.failed.emit(str(e))
@@ -218,9 +218,10 @@ class ScanDialog(QDialog):
             parent=self,
         )
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
+        self._worker.result.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.conflict.connect(self._on_conflict)
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _on_progress(self, idx: int, total: int, message: str) -> None:
@@ -305,6 +306,7 @@ class ScanDialog(QDialog):
             # the worker so it can finish on its own, then close the dialog.
             if not self._worker.wait(3000):
                 log.warning("Scan worker did not stop within 3s; detaching.")
+                self._worker.setParent(None)
                 self._worker.finished.connect(self._worker.deleteLater)
                 self._worker = None
             else:

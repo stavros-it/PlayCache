@@ -53,14 +53,11 @@ LIBRARY_ROOTS: list[tuple[str, str]] = [
     (r"\bsteam\b", "Steam"),
     (r"gog galaxy", "GOG"),
     (r"\bgog games?\b", "GOG"),
-    (r"\bgog\b", "GOG"),
-    (r"epic games[\\/]+.*?", "Epic"),
-    (r"\bepic\b", "Epic"),
+    (r"\bgog\b[\\/]", "GOG"),
+    (r"epic games[\\/]+", "Epic"),
     (r"origin games", "Origin"),
-    (r"\borigin\b", "Origin"),
-    (r"ubisoft.*", "Ubisoft"),
+    (r"\bubisoft\b[\\/]", "Ubisoft"),
     (r"battle\.?net", "Battle.net"),
-    # Linux launchers
     (r"\bheroic\b", "Heroic"),
     (r"\blutris\b", "Lutris"),
     (r"\bbottles\b", "Bottles"),
@@ -82,7 +79,7 @@ NOISE_TOKENS = [
     "gog", "goggames", "gog-games", "gogalaxy", "goggalaxy",
     "windows", "win", "win64", "win32",
     "linux", "appimage", "deb", "rpm", "flatpak", "snap",
-    "steamrip", "repack-by", "repacks",
+    "steamrip", "online", "pre", "full", "unlocked",
 ]
 
 # Regex chunks removed from folder names
@@ -172,26 +169,35 @@ def _normalize(text: str) -> str:
 
 
 def clean_folder_name(name: str) -> str:
-    """Strip release-group / version noise from a folder name to aid API search."""
+    """Strip release-group / version noise from a folder name to aid API search.
+
+    Preserves intra-word hyphens (e.g. ``"Half-Life"``, ``"Counter-Strike"``)
+    while still stripping noise tokens attached by hyphens (e.g.
+    ``"Doom Eternal-CODEX"`` → ``"Doom Eternal"``).
+    """
     n = _normalize(name)
-    # Remove file extension if any
     n = re.sub(r"\.(exe|zip|rar|7z|iso|bin)$", "", n, flags=re.IGNORECASE)
-    # Remove bracketed/parenthesised noise
     for rx in NOISE_REGEX:
         n = rx.sub(" ", n)
-    # Tokenise, drop noise tokens and pure-symbol tokens
-    tokens = re.split(r"[\s\-_.,]+", n)
+    tokens = re.split(r"[\s_.,]+", n)
     kept = []
     for t in tokens:
-        low = t.lower().strip(".,-_/()[]{}")
-        if not low:
+        t = t.strip(".,_/()[]{}")
+        if not t:
             continue
-        if low in NOISE_TOKENS:
+        sub = t.split("-")
+        good = []
+        for s in sub:
+            low = s.lower().strip(".,_/()[]{}")
+            if not low or low in NOISE_TOKENS:
+                continue
+            if not re.search(r"[A-Za-z0-9]", s):
+                continue
+            good.append(s.strip(".,_/()[]{}"))
+        if not good:
             continue
-        # Drop tokens that are mostly symbols
-        if not re.search(r"[A-Za-z0-9]", t):
-            continue
-        kept.append(t.strip(".,-_/()[]{}"))
+        cleaned_token = "-".join(good)
+        kept.append(cleaned_token)
     n = " ".join(kept)
     n = re.sub(r"\s{2,}", " ", n).strip(" -")
     return n
@@ -567,7 +573,7 @@ def _read_gog_metadata(folder: Path) -> str | None:
     one whose filename ID equals the JSON ``gameId`` field (the base game).
     Falls back to the first readable file.
     """
-    candidates: list[tuple[str, str]] = []  # (gameId, name)
+    candidates: list[tuple[str, str, str]] = []
     try:
         for entry in folder.iterdir():
             if not entry.is_file():
@@ -586,18 +592,16 @@ def _read_gog_metadata(folder: Path) -> str | None:
             if not name or not _looks_like_game_name(str(name)):
                 continue
             game_id = str(data.get("gameId") or data.get("GameId") or "")
-            candidates.append((game_id or file_id, str(name).strip()))
+            candidates.append((file_id, game_id, str(name).strip()))
     except (PermissionError, OSError) as e:
         log.debug("Cannot list %s for GOG metadata: %s", folder, e)
         return None
     if not candidates:
         return None
-    # Prefer entries where the JSON gameId matches the filename id (base game).
-    # Otherwise fall back to the first candidate.
-    for gid, name in candidates:
-        if gid and any(gid == cid for cid, _ in candidates if cid != gid):
+    for file_id, game_id, name in candidates:
+        if game_id and file_id == game_id:
             return name
-    return candidates[0][1]
+    return candidates[0][2]
 
 
 # Cache: (steamapps_dir) -> {installdir_lower: game_name}

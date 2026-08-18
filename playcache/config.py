@@ -80,14 +80,14 @@ class Config:
         # (portable releases bundle the example alongside the executable).
         found_path = config_path or _ensure_config_exists()
         if found_path and Path(found_path).is_file():
-            parser.read(found_path, encoding="utf-8")
+            parser.read(found_path, encoding="utf-8-sig")
             cfg.config_path = str(found_path)
 
         def get(section: str, key: str, fallback: str = "") -> str:
-            # Environment variables override config file: PLAYCACHE_RAWG_API_KEY etc.
             env_key = f"PLAYCACHE_{section.upper()}_{key.upper()}"
-            if os.getenv(env_key):
-                return os.environ[env_key]
+            val = os.getenv(env_key)
+            if val:
+                return val
             if parser.has_option(section, key):
                 return parser.get(section, key).strip()
             return fallback
