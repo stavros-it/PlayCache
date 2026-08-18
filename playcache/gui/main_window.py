@@ -362,6 +362,9 @@ class MainWindow(QMainWindow):
         # Status bar
         sb = QStatusBar()
         self.setStatusBar(sb)
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet(f"color: {TEXT_MUTED}; padding: 0 8px;")
+        sb.addPermanentWidget(self._status_label)
         self._copyright_lbl = QLabel("© 2026 Stavros Antoniou")
         self._copyright_lbl.setStyleSheet(f"color: {TEXT_MUTED}; padding: 0 8px;")
         sb.addPermanentWidget(self._copyright_lbl)
@@ -961,13 +964,11 @@ class MainWindow(QMainWindow):
         else:
             tgdb = "TGDB: off"
             tip = "TheGamesDB — API key not configured"
-        self.statusBar().showMessage(
+        self._status_label.setText(
             f"{total} games | {ok} ok | {not_found} not found | {error} errors | "
             f"{tgdb} (primary) | {rawg} (fallback)"
         )
-        # Tooltip with full quota details (hover the status bar to see it)
-        sb = self.statusBar()
-        sb.setToolTip(tip)
+        self._status_label.setToolTip(tip)
 
     @staticmethod
     def _fmt_duration(seconds: int) -> str:
