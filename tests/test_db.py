@@ -298,8 +298,9 @@ def test_disk_property_linux(monkeypatch):
 
 def test_disk_property_unc_path_windows(monkeypatch):
     """UNC paths (\\\\server\\share\\...) are grouped by \\\\server\\share."""
-    from playcache import models as _models
     import os
+
+    from playcache import models as _models
     _models.clear_volume_label_cache()
 
     monkeypatch.setattr(_models.sys, "platform", "win32")
