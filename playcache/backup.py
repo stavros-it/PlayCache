@@ -16,11 +16,16 @@ Design:
   ``GameRecord.from_row`` which ignores unknown keys and supplies defaults
   for missing ones — so a backup from an older or newer version still
   imports cleanly into whatever schema the running app has.
+- Export writes to a temp file then atomically renames, so a crash or disk
+  full never leaves a corrupt-looking backup file.
+- Import with ``replace_all=True`` does DELETE + all upserts in a single
+  transaction, so a crash mid-import never loses the existing catalog.
 """
 from __future__ import annotations
 
 import gzip
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,9 +39,10 @@ FORMAT_VERSION = 1
 def export_backup(db: Database, output_path: str) -> str:
     """Write the entire catalog to a compressed JSON file (``.json.gz``).
 
-    Returns the path written. Raises ``PermissionError`` (with a friendly
-    message) if the destination is locked, and ``OSError`` for other I/O
-    failures.
+    Returns the path written. The write is atomic: a temp file is used and
+    only renamed into place once fully written and flushed, so a crash or
+    disk-full never leaves a partially-written file that looks valid.
+    Raises ``OSError`` (with a contextual message) on I/O failure.
     """
     records = list(db.all_records())
     envelope = {
@@ -50,14 +56,26 @@ def export_backup(db: Database, output_path: str) -> str:
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(envelope, ensure_ascii=False, indent=2)
+    tmp = out.with_suffix(out.suffix + ".tmp")
     try:
-        with gzip.open(out, "wt", encoding="utf-8") as fh:
+        with gzip.open(tmp, "wt", encoding="utf-8") as fh:
             fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, out)
     except OSError as e:
-        raise PermissionError(
-            f"Cannot write to '{out}'. The file may be open in another "
-            f"program. Close it and try again."
-        ) from e
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        errno = getattr(e, "errno", None)
+        if errno in (13, 5):
+            raise PermissionError(
+                f"Cannot write to '{out}'. The file may be open in another "
+                f"program, or the location is read-only. Close it and try again."
+            ) from e
+        raise OSError(f"Could not write backup to '{out}': {e}") from e
     return str(out)
 
 
@@ -72,7 +90,9 @@ def import_backup(db: Database, input_path: str, *, replace_all: bool = False) -
         Path to a ``.json.gz`` backup produced by :func:`export_backup`.
     replace_all
         If True, **delete every existing row** before importing. Useful for
-        restoring a snapshot. Default False (merge by ``folder_path``).
+        restoring a snapshot. The DELETE and all upserts run in a **single
+        transaction**, so a crash mid-import rolls back and the existing
+        catalog is preserved. Default False (merge by ``folder_path``).
 
     Returns a summary dict: ``{"imported": int, "skipped": int,
     "format_version": int, "app_version": str}``. ``skipped`` counts rows
@@ -104,34 +124,24 @@ def import_backup(db: Database, input_path: str, *, replace_all: bool = False) -
     if not isinstance(games, list):
         raise TypeError("'games' must be a list.")
 
-    if replace_all:
-        with db.connect() as conn:
-            conn.execute("DELETE FROM games;")
-
-    imported = 0
+    parsed: list[GameRecord] = []
     skipped = 0
     for row in games:
         if not isinstance(row, dict):
             skipped += 1
             continue
         folder_path = row.get("folder_path")
-        if not folder_path:
+        if not isinstance(folder_path, str) or not folder_path:
             skipped += 1
             continue
-        # Drop None values so dataclass defaults apply for fields the
-        # backup didn't populate (or explicitly set to null). This matters
-        # for NOT NULL columns like esrb_rating / manual_overrides: passing
-        # None would violate the constraint, but omitting the key lets the
-        # dataclass default ("") kick in. Fields with a None default
-        # (rawg_id, metacritic_score, …) get None either way.
         clean = {c: v for c, v in row.items() if c in COLUMNS and v is not None}
-        record = GameRecord.from_row(clean)
-        db.upsert(record)
-        imported += 1
+        parsed.append(GameRecord.from_row(clean))
+
+    imported = db.upsert_many(parsed, replace_all=replace_all)
 
     return {
         "imported": imported,
         "skipped": skipped,
         "format_version": version,
-        "app_version": envelope.get("app_version", "unknown"),
+        "app_version": envelope.get("app_version") or "unknown",
     }

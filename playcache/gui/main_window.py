@@ -363,7 +363,7 @@ class MainWindow(QMainWindow):
         sb = QStatusBar()
         self.setStatusBar(sb)
         self._copyright_lbl = QLabel("© 2026 Stavros Antoniou")
-        self._copyright_lbl.setStyleSheet("color: #94A3B8; padding: 0 8px;")
+        self._copyright_lbl.setStyleSheet(f"color: {TEXT_MUTED}; padding: 0 8px;")
         sb.addPermanentWidget(self._copyright_lbl)
 
     # ------------------------------------------------------------------ #
@@ -380,7 +380,7 @@ class MainWindow(QMainWindow):
             self._db.set_field(folder_path, field, value)
         except ValueError as e:
             log.warning("Could not persist edit to %s.%s: %s", folder_path, field, e)
-        except OSError as e:
+        except Exception as e:
             log.warning("DB error persisting edit to %s.%s: %s", folder_path, field, e)
 
     def _auto_resize_columns(self) -> None:
@@ -533,12 +533,17 @@ class MainWindow(QMainWindow):
         )
 
     def _select_by_folder_path(self, folder_path: str) -> None:
-        """Find and select the row whose record.folder_path matches."""
+        """Find and select the row whose record.folder_path matches.
+
+        Clears any previous selection first so the detail panel shows the
+        newly-added row, not a stale multi-selection.
+        """
         for row in range(self._model.rowCount()):
             rec = self._model.record_at(row)
             if rec and rec.folder_path == folder_path:
                 proxy_index = self._proxy.mapFromSource(self._model.index(row, 0))
                 if proxy_index.isValid():
+                    self.table.clearSelection()
                     self.table.selectRow(proxy_index.row())
                     self.table.scrollTo(proxy_index)
                 return
@@ -667,7 +672,12 @@ class MainWindow(QMainWindow):
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
             return
-        # Gather selected records (proxy → source row).
+        if getattr(self, "_refetch_worker", None) and self._refetch_worker.isRunning():
+            QMessageBox.warning(
+                self, "Busy",
+                "A re-fetch is already running. Please wait for it to finish.",
+            )
+            return
         records: list[GameRecord] = []
         rows: list[int] = []
         for proxy_index in indexes:
@@ -678,7 +688,6 @@ class MainWindow(QMainWindow):
                 rows.append(row)
         if not records:
             return
-        # Single row: synchronous (fast, updates detail panel immediately).
         if len(records) == 1:
             record = records[0]
             row = rows[0]
@@ -979,12 +988,13 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ #
     def closeEvent(self, event) -> None:
-        # Stop any running worker threads before exit
         worker = getattr(self, "_refetch_worker", None)
         if worker and worker.isRunning():
             worker.cancel()
-            worker.wait(3000)
+            if not worker.wait(5000):
+                worker.terminate()
+                worker.wait(2000)
         quota_worker = getattr(self, "_quota_worker", None)
         if quota_worker and quota_worker.isRunning():
-            quota_worker.wait(3000)
+            quota_worker.wait(5000)
         event.accept()

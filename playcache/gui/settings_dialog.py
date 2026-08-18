@@ -1,6 +1,7 @@
 """Settings dialog for API keys and scan parameters."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -28,34 +29,62 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setMinimumWidth(480)
         self._config = config
-        # Prefer the path recorded by Config.load(); fall back to CWD.
         self._config_path = (
             Path(config_path) if config_path
             else Path(getattr(config, "config_path", "") or Path.cwd() / "config.ini")
         )
 
+        self._rawg_from_env = bool(os.getenv("RAWG_API_KEY"))
+        self._tgdb_from_env = bool(os.getenv("THEGAMESDB_API_KEY"))
+
         layout = QVBoxLayout(self)
+        env_note = (
+            "Environment variables (RAWG_API_KEY, THEGAMESDB_API_KEY) take "
+            "priority over the file."
+        )
+        if self._rawg_from_env or self._tgdb_from_env:
+            env_sources = []
+            if self._rawg_from_env:
+                env_sources.append("RAWG_API_KEY")
+            if self._tgdb_from_env:
+                env_sources.append("THEGAMESDB_API_KEY")
+            env_note = (
+                f"Keys set via environment variable ({', '.join(env_sources)}) "
+                f"are NOT shown here and will NOT be written to config.ini. "
+                f"Clear the env var to edit the file value."
+            )
         title = QLabel(
-            f"Settings are saved to:\n{self._config_path}\n"
-            "Environment variables (RAWG_API_KEY, THEGAMESDB_API_KEY) take priority."
+            f"Settings are saved to:\n{self._config_path}\n{env_note}"
         )
         title.setWordWrap(True)
         layout.addWidget(title)
 
         form = QFormLayout()
 
-        self.rawg_key = QLineEdit(config.rawg_api_key)
-        self.rawg_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.rawg_key.setPlaceholderText("Optional fallback key (rawg.io/apiauth)")
+        if self._rawg_from_env:
+            self.rawg_key = QLineEdit()
+            self.rawg_key.setEchoMode(QLineEdit.EchoMode.Password)
+            self.rawg_key.setPlaceholderText("Set via RAWG_API_KEY env var — not editable here")
+            self.rawg_key.setEnabled(False)
+        else:
+            self.rawg_key = QLineEdit(config.rawg_api_key)
+            self.rawg_key.setEchoMode(QLineEdit.EchoMode.Password)
+            self.rawg_key.setPlaceholderText("Optional fallback key (rawg.io/apiauth)")
         form.addRow("RAWG API key:", self.rawg_key)
 
-        self.tgdb_key = QLineEdit(config.thegamesdb_api_key)
-        self.tgdb_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.tgdb_key.setPlaceholderText("Primary source — get a key at api.thegamesdb.net/key.php")
+        if self._tgdb_from_env:
+            self.tgdb_key = QLineEdit()
+            self.tgdb_key.setEchoMode(QLineEdit.EchoMode.Password)
+            self.tgdb_key.setPlaceholderText("Set via THEGAMESDB_API_KEY env var — not editable here")
+            self.tgdb_key.setEnabled(False)
+        else:
+            self.tgdb_key = QLineEdit(config.thegamesdb_api_key)
+            self.tgdb_key.setEchoMode(QLineEdit.EchoMode.Password)
+            self.tgdb_key.setPlaceholderText("Primary source — get a key at api.thegamesdb.net/key.php")
         form.addRow("TheGamesDB API key:", self.tgdb_key)
 
         self.delay = QDoubleSpinBox()
-        self.delay.setRange(0.0, 10.0)
+        self.delay.setRange(0.1, 10.0)
         self.delay.setSingleStep(0.1)
         self.delay.setValue(config.request_delay)
         self.delay.setSuffix(" s")
@@ -94,25 +123,20 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    # ------------------------------------------------------------------ #
     def _save(self) -> None:
-        # Snapshot the new values WITHOUT mutating the live config yet — only
-        # mutate after the file write succeeds, so a failed save doesn't leave
-        # the in-memory config inconsistent with the persisted file.
-        new_rawg = self.rawg_key.text().strip()
-        new_tgdb = self.tgdb_key.text().strip()
+        new_rawg = self.rawg_key.text().strip() if self.rawg_key.isEnabled() else self._config.rawg_api_key
+        new_tgdb = self.tgdb_key.text().strip() if self.tgdb_key.isEnabled() else self._config.thegamesdb_api_key
         new_delay = self.delay.value()
         new_timeout = self.timeout.value()
         new_retries = self.retries.value()
         new_threshold = self.threshold.value()
         new_desc_max = self.desc_max.value()
 
-        # Persist to config.ini via an atomic write (temp file + replace).
         try:
             from configparser import ConfigParser
             parser = ConfigParser()
             if self._config_path.is_file():
-                parser.read(self._config_path, encoding="utf-8")
+                parser.read(self._config_path, encoding="utf-8-sig")
             for section in ("rawg", "thegamesdb", "catalog"):
                 if not parser.has_section(section):
                     parser.add_section(section)
@@ -130,13 +154,20 @@ class SettingsDialog(QDialog):
             )
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._config_path.with_suffix(".tmp")
-            with tmp.open("w", encoding="utf-8") as fh:
-                parser.write(fh)
-            tmp.replace(self._config_path)
+            try:
+                with tmp.open("w", encoding="utf-8") as fh:
+                    parser.write(fh)
+                tmp.replace(self._config_path)
+            except OSError:
+                if tmp.exists():
+                    try:
+                        tmp.unlink()
+                    except OSError:
+                        pass
+                raise
         except OSError as e:
             QMessageBox.warning(self, "Could not save settings", str(e))
             return
-        # File write succeeded — now mutate the in-memory config.
         self._config.rawg_api_key = new_rawg
         self._config.thegamesdb_api_key = new_tgdb
         self._config.request_delay = new_delay

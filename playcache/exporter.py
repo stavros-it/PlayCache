@@ -14,6 +14,23 @@ HEADERS = [
     "GAME TYPE", "SHORT DESCRIPTION",
 ]
 
+_COL_WIDTHS = dict(zip(HEADERS, [42, 16, 16, 14, 24, 90], strict=True))
+
+_INJECTION_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_cell(val):
+    """Prevent CSV/Excel formula injection.
+
+    If a string value starts with a formula character (=, +, -, @), prefix
+    it with a single quote so Excel treats it as text, not a formula.
+    """
+    if val is None:
+        return ""
+    if isinstance(val, str) and val.startswith(_INJECTION_PREFIXES):
+        return f"'{val}"
+    return val
+
 
 def export_xlsx(db: Database, output_path: str) -> str:
     rows = db.list_excel_view()
@@ -31,30 +48,29 @@ def export_xlsx(db: Database, output_path: str) -> str:
 
     for r, row in enumerate(rows, start=2):
         for c, header in enumerate(HEADERS, 1):
-            val = row.get(header, "")
-            if val is None:
-                val = ""
+            val = _sanitize_cell(row.get(header, ""))
             cell = ws.cell(row=r, column=c, value=val)
             if header == "SHORT DESCRIPTION":
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
             else:
                 cell.alignment = Alignment(vertical="top")
 
-    # Column widths
-    widths = [42, 16, 16, 14, 24, 90]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
+    for i, header in enumerate(HEADERS, 1):
+        ws.column_dimensions[get_column_letter(i)].width = _COL_WIDTHS[header]
     ws.freeze_panes = "A2"
-    # Auto-filter on the header row so users can sort/filter in Excel.
-    ws.auto_filter.ref = ws.dimensions
+    if rows:
+        ws.auto_filter.ref = ws.dimensions
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
         wb.save(out)
-    except PermissionError as e:
-        raise PermissionError(
-            f"Cannot write to '{out}'. The file may be open in another "
-            f"program (e.g. Excel). Close it and try again."
-        ) from e
+    except OSError as e:
+        errno = getattr(e, "errno", None)
+        if errno in (13, 5):
+            raise PermissionError(
+                f"Cannot write to '{out}'. The file may be open in another "
+                f"program (e.g. Excel). Close it and try again."
+            ) from e
+        raise OSError(f"Could not write Excel file to '{out}': {e}") from e
     return str(out)

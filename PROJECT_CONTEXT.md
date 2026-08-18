@@ -72,7 +72,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 134 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 164 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -128,16 +128,17 @@ Game DB/
 │       ├── duplicates_dialog.py # fuzzy duplicate finder + resolver
 │       └── main_window.py     # toolbar, filters, table, proxy, status bar
 └── tests/                     # pytest suite
-    ├── test_textutils.py             # 27 tests (includes clean_search_query)
-    ├── test_folder_scanner.py        # 53 tests (smart detection + year/apostrophe)
-    ├── test_db.py                    # 8 tests (upsert + stats distributions + overrides)
+    ├── test_textutils.py             # 34 tests (NaN/Inf ratings, em-dash, truncate)
+    ├── test_folder_scanner.py        # 57 tests (smart detection + GOG base-game + hyphens)
+    ├── test_db.py                    # 16 tests (upsert_many + UNC paths + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_manual_overrides.py      # 10 tests + schema migration
     ├── test_item_delegate.py         # 13 tests — paint regression for PySide6 6.x enums
-    └── test_backup.py               # 16 tests (compressed JSON round-trip)
+    ├── test_backup.py                # 18 tests (atomic write, replace_all atomicity)
+    └── test_exporter.py             # 8 tests (formula injection sanitization)
 ```
 
-**Total**: ~5,196 LOC source + ~1,366 LOC tests = ~6,562 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,196 LOC source + ~1,500 LOC tests = ~6,696 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -313,7 +314,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 134 passing).
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 164 passing).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)

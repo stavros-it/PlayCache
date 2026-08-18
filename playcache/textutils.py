@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import math
 import re
 from collections.abc import Iterable
 from difflib import SequenceMatcher
@@ -13,7 +14,6 @@ _WS_RE = re.compile(r"\s+")
 def strip_html(text: str | None) -> str:
     if not text:
         return ""
-    # Unescape entities first, then drop tags, then normalise whitespace
     text = html.unescape(text)
     text = _TAG_RE.sub(" ", text)
     text = _WS_RE.sub(" ", text)
@@ -22,10 +22,11 @@ def strip_html(text: str | None) -> str:
 
 def truncate(text: str, max_chars: int = 320) -> str:
     text = (text or "").strip()
+    if max_chars <= 0:
+        return ""
     if len(text) <= max_chars:
         return text
     cut = text[:max_chars]
-    # Cut at the last word boundary
     last_space = cut.rfind(" ")
     if last_space > max_chars * 0.6:
         cut = cut[:last_space]
@@ -35,13 +36,8 @@ def truncate(text: str, max_chars: int = 320) -> str:
 def clean_search_query(name: str) -> str:
     """Light extra cleaning for the API query string (e.g. trim trailing edition)."""
     q = strip_html(name)
-    # Drop subtitle/edition suffixes that hurt search precision.
-    # Only treat colon or en-dash as a subtitle separator — NOT ASCII hyphen,
-    # which is common inside game titles ("Half-Life", "Counter-Strike").
-    # A hyphen is only treated as a separator when surrounded by whitespace
-    # ("Some Game - subtitle"), so intra-word hyphens are preserved.
     q = re.sub(r"\s*[:]\s*.*$", "", q)
-    q = re.sub(r"\s+[-–]\s+.*$", "", q)
+    q = re.sub(r"\s+[-–—]\s+.*$", "", q)
     return _WS_RE.sub(" ", q).strip()
 
 
@@ -59,16 +55,13 @@ def best_match(
     candidates: Iterable[tuple[str, object]],
     threshold: float = 60.0,
 ) -> object | None:
-    """Pick the candidate whose name best matches ``query``.
-
-    ``candidates`` is an iterable of (name, candidate) tuples.
-    """
+    """Pick the candidate whose name best matches ``query``."""
     best: object | None = None
     best_score = threshold
+    q_lower = query.lower()
     for name, cand in candidates:
         score = similarity(query, name)
-        # Reward exact/substring containment
-        if query.lower() in name.lower():
+        if q_lower in name.lower() and len(q_lower) >= 3:
             score = max(score, 90.0)
         if score > best_score:
             best_score = score
@@ -84,9 +77,8 @@ def format_rating(out_of_10: float | None) -> str:
         val = float(out_of_10)
     except (TypeError, ValueError):
         return ""
-    if val <= 0:
+    if math.isnan(val) or math.isinf(val) or val <= 0 or val > 10:
         return ""
-    # One decimal place, drop trailing .0
     formatted = f"{val:.1f}".rstrip("0").rstrip(".")
     return f"{formatted}/10"
 

@@ -35,6 +35,12 @@ class TestTruncate:
     def test_exact_length(self):
         assert truncate("exact", 5) == "exact"
 
+    def test_zero_max_chars(self):
+        assert truncate("hello", 0) == ""
+
+    def test_negative_max_chars(self):
+        assert truncate("hello", -1) == ""
+
 
 class TestFormatRating:
     def test_whole_number(self):
@@ -58,6 +64,18 @@ class TestFormatRating:
     def test_rawg_rating_doubled(self):
         # RAWG rating 4.5 / 5 -> 9.0 / 10
         assert format_rating(4.5 * 2) == "9/10"
+
+    def test_nan_returns_empty(self):
+        assert format_rating(float("nan")) == ""
+
+    def test_inf_returns_empty(self):
+        assert format_rating(float("inf")) == ""
+
+    def test_over_10_returns_empty(self):
+        assert format_rating(85.0) == ""
+
+    def test_negative_returns_empty(self):
+        assert format_rating(-1.0) == ""
 
 
 class TestSimilarity:
@@ -117,6 +135,9 @@ class TestCleanSearchQuery:
 
     def test_strips_en_dash_subtitle(self):
         assert clean_search_query("Some Game – subtitle") == "Some Game"
+
+    def test_strips_em_dash_subtitle(self):
+        assert clean_search_query("Some Game — subtitle") == "Some Game"
 
     def test_plain_name_unchanged(self):
         assert clean_search_query("Deep Rock Galactic") == "Deep Rock Galactic"
