@@ -67,10 +67,11 @@ def export_xlsx(db: Database, output_path: str) -> str:
         wb.save(out)
     except OSError as e:
         errno = getattr(e, "errno", None)
-        if errno in (13, 5):
+        if errno in (13, 5, 21):
             raise PermissionError(
                 f"Cannot write to '{out}'. The file may be open in another "
-                f"program (e.g. Excel). Close it and try again."
+                f"program (e.g. Excel), the location is read-only, or it is "
+                f"a directory. Close it and try again."
             ) from e
         raise OSError(f"Could not write Excel file to '{out}': {e}") from e
     return str(out)

@@ -70,10 +70,11 @@ def export_backup(db: Database, output_path: str) -> str:
             except OSError:
                 pass
         errno = getattr(e, "errno", None)
-        if errno in (13, 5):
+        if errno in (13, 5, 21):
             raise PermissionError(
                 f"Cannot write to '{out}'. The file may be open in another "
-                f"program, or the location is read-only. Close it and try again."
+                f"program, the location is read-only, or it is a directory. "
+                f"Close it and try again."
             ) from e
         raise OSError(f"Could not write backup to '{out}': {e}") from e
     return str(out)
