@@ -194,7 +194,7 @@ class GameRecord:
                 label = _volume_label(root)
                 return label or drive
             if path.startswith("\\\\"):
-                parts = path.split(os.sep)
+                parts = path.split("\\")
                 if len(parts) >= 4 and parts[2]:
                     return f"\\\\{parts[2]}\\{parts[3]}"
             return "—"
