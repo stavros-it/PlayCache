@@ -13,8 +13,8 @@
 - ✅ Smart game-name detection — 6-priority chain (Steam manifest → GOG metadata →
   GOG setup .exe → folder name → largest non-launcher .exe → folder name fallback)
 - ✅ Disk conflict detection during scan — pauses and prompts user (new / old / both)
-- ✅ TheGamesDB primary + RAWG fallback with fuzzy matching and retry/backoff
-- ✅ RAWG merge step — fills numeric rating, Metacritic, cover, website after TGDB
+- ✅ RAWG primary + TheGamesDB fallback with fuzzy matching and retry/backoff
+- ✅ TheGamesDB merge step — fills ESRB rating after RAWG succeeds
 - ✅ ESRB age ratings from TheGamesDB (stored in `esrb_rating` column)
 - ✅ Cover images from TheGamesDB boxart (`include=boxart`) — no RAWG dependency
 - ✅ SQLite storage with `v_excel` view matching the 6-column reference Excel layout
@@ -242,6 +242,40 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-08-18 — Switch primary API from TheGamesDB to RAWG
+
+**Trigger**: RAWG's API is active again (was returning HTTP 522 since
+2025-08-16). The user requested switching the primary provider to RAWG with
+TheGamesDB as the fallback.
+
+**Changes**:
+- `Cataloger._fetch`: now tries RAWG first; on not_found/error falls back to
+  TheGamesDB (previously the reverse).
+- `Cataloger._merge_from_rawg` → `_merge_from_tgdb`: after RAWG succeeds, TGDB
+  is queried to fill `esrb_rating`, `thegamesdb_id`, and `cover_url` (if
+  empty). Previously RAWG filled `user_rating`, `metacritic_score`,
+  `cover_url`, `website` after TGDB.
+- Status bar now shows `RAWG: N calls (primary) | TGDB: M/L (fallback)`.
+  Both clients now track `request_count` per session. The status bar
+  refreshes after every refetch progress callback so the call count updates
+  live during multi-row refetches.
+- Startup quota fetch still queries TGDB `/Genres` to populate the genre
+  cache and quota — this is still needed because TGDB is the fallback and
+  its genre cache is required for TGDB's `_apply()` to resolve genre IDs.
+- Integration tests rewritten: `test_pipeline_rawg_fetch_and_store`,
+  `test_pipeline_rawg_merge_from_tgdb`, `test_pipeline_fallback_to_tgdb`.
+- Docs updated across README, PROJECT_CONTEXT, and client docstrings.
+
+**Trade-offs**:
+- RAWG has no monthly quota (20k req/day, effectively unlimited for a
+  desktop cataloguer), so the primary path no longer has a quota ceiling.
+- TGDB's ESRB ratings are now filled in the merge step (one extra API call
+  per game when TGDB is available). This is a fair trade — ESRB is the only
+  field TGDB provides that RAWG doesn't.
+- If RAWG goes down again, TGDB takes over as fallback. The user would lose
+  `user_rating`, `metacritic_score`, and `website` until RAWG recovers, but
+  would still get ESRB, description, and cover from TGDB.
 
 ### 2026-08-18 — Full-codebase audit: atomicity, injection, and crash fixes
 

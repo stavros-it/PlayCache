@@ -6,8 +6,8 @@
 
 <p align="center">
 A desktop catalog for every game you own. Point PlayCache at your game folders
-and it fetches covers, ratings, and descriptions from <strong>TheGamesDB</strong>
-(primary) and <strong>RAWG</strong> (fallback + merge), then presents them in a
+and it fetches covers, ratings, and descriptions from <strong>RAWG</strong>
+(primary) and <strong>TheGamesDB</strong> (fallback + merge), then presents them in a
 polished <strong>dark-themed</strong> view you can search, edit, and export to Excel.
 Backed by a local <strong>SQLite</strong> database with compressed JSON backups and
 a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</strong>.
@@ -47,13 +47,13 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
 - **Steam manifest caching** — O(N) instead of O(N²) per scan
 
 ### Metadata sources
-- **TheGamesDB (primary)** — free, requires a key. Provides genres, developers,
-  publishers, ESRB ratings, and boxart cover images. Public-tier limit is 1000
-  requests/month; the status bar shows the remaining quota.
-- **RAWG (fallback + merge)** — free, optional but recommended. When TGDB has
-  no match, RAWG is queried. When TGDB succeeds, RAWG is *also* queried in a
-  merge step to fill numeric `user_rating`, `metacritic_score`, and `website`.
-  If RAWG is unreachable, the merge step is skipped silently.
+- **RAWG (primary)** — free, requires a key. Provides genres, developers,
+  publishers, release date, Metacritic score, numeric user rating, cover
+  image, website, and description. 20,000 requests/day.
+- **TheGamesDB (fallback + merge)** — free, optional but recommended. When
+  RAWG has no match, TGDB is queried. When RAWG succeeds, TGDB is *also*
+  queried in a merge step to fill ESRB age ratings (which RAWG lacks).
+  If TGDB is unreachable, the merge step is skipped silently.
 - **Fuzzy matching** with `difflib.SequenceMatcher` (configurable threshold)
 - **Retry/backoff** with `Retry-After` honoring on 429; 4xx errors are not retried
 
@@ -94,7 +94,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
    - **Windows**: `PlayCache-vX.Y.Z-windows-portable.zip` — extract and run `PlayCache.exe`
    - **Linux**: `PlayCache-vX.Y.Z-linux-x86_64.AppImage` — `chmod +x` and run
 3. On first launch, `config.ini` is auto-created from the bundled example.
-   Edit it and paste your free TheGamesDB API key.
+   Edit it and paste your free RAWG API key.
 
 ### Option B: Run from source
 
@@ -103,7 +103,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
 # 1. Install dependencies
 python -m pip install -r requirements.txt
 
-# 2. Copy the config template and add your free TheGamesDB key
+# 2. Copy the config template and add your free RAWG key
 Copy-Item config.example.ini config.ini
 notepad config.ini        # paste your key under [thegamesdb] api_key =
 
@@ -118,7 +118,7 @@ python run.py             # console visible (useful for debugging)
 # 1. Install dependencies
 python3 -m pip install -r requirements.txt
 
-# 2. Copy the config template and add your free TheGamesDB key
+# 2. Copy the config template and add your free RAWG key
 cp config.example.ini config.ini
 ${EDITOR:-nano} config.ini   # paste your key under [thegamesdb] api_key =
 
@@ -136,8 +136,8 @@ rescan, export to Excel, back up the catalog, view stats, or change settings.
 
 | Provider | Sign-up URL | Notes |
 |----------|-------------|-------|
-| **TheGamesDB** (recommended) | https://api.thegamesdb.net/login | Primary source. 1000 requests/month. |
-| **RAWG** (optional) | https://rawg.io/apiauth | Fallback + merge. 20,000 requests/day. |
+| **RAWG** (recommended) | https://rawg.io/apiauth | Primary source. 20,000 requests/day. |
+| **TheGamesDB** (optional) | https://api.thegamesdb.net/login | Fallback + merge. 1000 requests/month. |
 
 Put the keys in `config.ini`, or set environment variables `THEGAMESDB_API_KEY`
 and `RAWG_API_KEY` (or `PLAYCACHE_THEGAMESDB_API_KEY` /
@@ -171,13 +171,13 @@ responsive. Cover images are downloaded lazily and cached on disk under
 
 ## How matching works
 
-For each folder, the cleaned name is sent to TheGamesDB's search endpoint.
+For each folder, the cleaned name is sent to RAWG's search endpoint.
 The top results are scored with a fuzzy similarity ratio (stdlib `difflib`);
 the best match above the configured threshold (`fuzzy_threshold`, default 60)
-is fetched in full. If TGDB returns no confident match, the same flow runs
-against RAWG. When TGDB succeeds, RAWG is *also* queried in a merge step to
-fill the numeric `user_rating`, `metacritic_score`, and `website` that TGDB
-lacks — only empty fields are filled, TGDB data is never overwritten.
+is fetched in full. If RAWG returns no confident match, the same flow runs
+against TheGamesDB. When RAWG succeeds, TGDB is *also* queried in a merge
+step to fill the `esrb_rating` that RAWG lacks — only empty fields are
+filled, RAWG data is never overwritten.
 Re-runs skip games already marked `ok` unless **Rescan All** (or **Re-fetch**
 on a single row) is used, so you can resume large scans.
 
@@ -234,8 +234,8 @@ playcache/
   db.py                   # SQLite schema, upsert, v_excel view, overrides, stats
   folder_scanner.py       # drive parsing, smart name detection, store/platform
   textutils.py            # HTML strip, truncation, rating format, fuzzy match
-  rawg_client.py          # RAWG API client — fallback + merge source
-  thegamesdb_client.py    # TheGamesDB primary client; genres/devs/pubs/boxart/quota
+  rawg_client.py          # RAWG API client — primary source
+  thegamesdb_client.py    # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
   cataloger.py            # scan → fetch → merge → upsert orchestrator
   image_cache.py          # async Qt cover-image fetcher with disk cache
   exporter.py             # SQLite → .xlsx (6-column reference layout)

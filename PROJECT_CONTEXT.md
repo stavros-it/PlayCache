@@ -7,7 +7,7 @@
 
 **PlayCache** is a cross-platform desktop application (PySide6 GUI) for
 **Windows and Linux** that scans a drive or folder of installed games, fetches
-metadata from free online services (TheGamesDB primary, RAWG fallback + merge
+metadata from free online services (RAWG primary, TheGamesDB fallback + merge
 step), and catalogues them into a local SQLite database. The data model and
 Excel export follow a 6-column reference layout (GAME NAME, PLATFORM,
 GOG / STEAM, USER RATING, GAME TYPE, SHORT DESCRIPTION).
@@ -27,7 +27,8 @@ produced in collaboration with AI assistants and reviewed by the author.
    (Ctrl+N) to manually add a game by name without a folder on disk.
 3. Background thread scans folders, calls APIs, upserts to SQLite; live progress
    shown in the scan dialog and the status bar. The status bar also shows the
-   TheGamesDB monthly quota (e.g. `TGDB: 890/1000`) after the first API call.
+   TheGamesDB monthly quota (e.g. `TGDB: 890/1000`) and RAWG call count
+   (e.g. `RAWG: 42 calls`) in the status bar after the first API call.
 4. Browse the sortable/filterable games table — columns auto-fit to content
    (Excel-style); select multiple rows with Ctrl/Shift. The table uses a
    **dark slate theme** with subtle zebra striping and an indigo selection
@@ -106,8 +107,8 @@ Game DB/
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
 │   ├── folder_scanner.py      # smart game-name detection from folders/files/metadata
 │   ├── textutils.py           # HTML strip, truncate, ratings, fuzzy match
-│   ├── rawg_client.py         # RAWG API client — fallback + merge source
-│   ├── thegamesdb_client.py   # TheGamesDB primary client; genres/devs/pubs/boxart/quota
+│   ├── rawg_client.py         # RAWG API client — primary source
+│   ├── thegamesdb_client.py   # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
 │   ├── cataloger.py           # scan → fetch → merge → upsert + conflict detection
 │   ├── image_cache.py         # async Qt cover-image fetcher + disk cache
 │   ├── exporter.py            # SQLite → .xlsx matching reference
@@ -162,14 +163,14 @@ Game DB/
 │      AddGame… ─────┤ uses                             │       │
 │      FindDups… ───► DuplicatesDialog (fuzzy match)   │       │
 │      QuotaWorker ─►│                                 │       │
-│      (startup)     ├─► TheGamesDBClient (primary)    │       │
-│                    │     • genres/devs/pubs resolve   │       │
-│                    │     • boxart → cover_url         │       │
-│                    │     • quota: remaining/1000       │       │
-│                    └─► RAWGClient      (fallback)      │       │
-│                    │   + _merge_from_rawg() fills      │       │
-│                    │     rating/metacritic/cover       │       │
-│                    │     after TGDB succeeds            │       │
+│      (startup)     ├─► RAWGClient      (primary)      │       │
+│                    │     • genres/devs/pubs/stores    │       │
+│                    │     • rating/metacritic/website  │       │
+│                    │     • background_image → cover   │       │
+│                    └─► TheGamesDBClient (fallback)     │       │
+│                    │   + _merge_from_tgdb() fills      │       │
+│                    │     esrb_rating/thegamesdb_id     │       │
+│                    │     after RAWG succeeds            │       │
 │                    │                                   │       │
 │    theme.py ──► DARK_QSS (centralized palette)       │       │
 │    item_delegate.py ─► GamesItemDelegate              │       │
@@ -198,17 +199,15 @@ Game DB/
    Then detects store + platform. If a game is found that already exists in the
    DB on a **different disk**, a conflict handler prompts the user to choose
    which copy to keep (new / old / both).
-2. **Fetch** (`Cataloger._fetch`): tries TheGamesDB first; on no-confident-match
-   or error, falls back to RAWG. Fuzzy `SequenceMatcher` picks the best result
-   above `fuzzy_threshold` (default 60). Retries 429/5xx with backoff.
-3. **Merge** (`Cataloger._merge_from_rawg`): when TheGamesDB succeeds, RAWG is
-   *also* queried to fill fields TGDB lacks — numeric `user_rating` (RAWG
-   rating ×2 → /10), `metacritic_score`, `cover_url` (if TGDB had no boxart),
-   `website`. Only empty fields are filled; TGDB-sourced data is never
-   overwritten. Skipped silently if RAWG is unavailable. TheGamesDB's ESRB text
-   rating (e.g. `"T - Teen"`) is stored in the separate `esrb_rating` column
-   and is not a numeric score. TGDB boxart (front cover) is extracted from the
-   `include=boxart` block and stored in `cover_url`.
+2. **Fetch** (`Cataloger._fetch`): tries RAWG first; on no-confident-match
+   or error, falls back to TheGamesDB. Fuzzy `SequenceMatcher` picks the best
+   result above `fuzzy_threshold` (default 60). Retries 429/5xx with backoff.
+3. **Merge** (`Cataloger._merge_from_tgdb`): when RAWG succeeds, TheGamesDB is
+   *also* queried to fill fields RAWG lacks — `esrb_rating` (ESRB text like
+   "T - Teen"), `thegamesdb_id`, and `cover_url` if still empty. Only empty
+   fields are filled; RAWG-sourced data is never overwritten. Skipped silently
+   if TheGamesDB is unavailable. RAWG's numeric `user_rating` (rating ×2 → /10),
+   `metacritic_score`, and `website` are always populated by the primary fetch.
 4. **Overrides** (`Cataloger._apply_overrides`): after fetch + merge, the
    cataloger re-applies the game's `manual_overrides` map so user edits are
    never overwritten by fresh API data.
@@ -275,17 +274,17 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
 `max_retries` (3), `fuzzy_threshold` (60), `description_max_chars` (320),
 `skip_folders` (Windows system folders).
 
-**API keys** (in `[thegamesdb]` and `[rawg]` sections of `config.ini`):
-- TheGamesDB — https://api.thegamesdb.net/login (free, required — this is the
-  primary data source). Key goes in `[thegamesdb] api_key`. Public-tier limit
-  is 1000 requests/month; the API returns `remaining_monthly_allowance`,
+**API keys** (in `[rawg]` and `[thegamesdb]` sections of `config.ini`):
+- RAWG — https://rawg.io/apiauth (free, 20k req/day). Required — this is the
+  primary data source. Key goes in `[rawg] api_key`. The client tracks request
+  count per session (shown in the status bar as `RAWG: N calls`).
+- TheGamesDB — https://api.thegamesdb.net/login (free, 1000 req/month).
+  Optional but **recommended** — fills `esrb_rating` and `thegamesdb_id` in the
+  merge step after RAWG succeeds, and serves as the fallback when RAWG has no
+  match. Key goes in `[thegamesdb] api_key`. Public-tier limit is 1000
+  requests/month; the API returns `remaining_monthly_allowance`,
   `extra_allowance`, and `allowance_refresh_timer` with each response, which
   the client captures and the status bar displays (e.g. `TGDB: 890/1000`).
-- RAWG — https://rawg.io/apiauth (free, 20k req/day). Optional but
-  **recommended** — provides the numeric `user_rating`, `metacritic_score`, and
-  `cover_url` that TheGamesDB lacks. Without it those fields stay empty. Key
-  goes in `[rawg] api_key`. If RAWG is unreachable (e.g. HTTP 522), the merge
-  step is skipped silently and the rest of the data still populates.
 
 ## 7. Key conventions
 
@@ -330,7 +329,7 @@ python -m pip install -r requirements.txt
 
 # Configure (one-time)
 Copy-Item config.example.ini config.ini
-notepad config.ini        # paste TheGamesDB API key; RAWG key optional
+notepad config.ini        # paste RAWG API key; TGDB key optional but recommended
 
 # Run the GUI (no console window; output goes to playcache.log)
 python run.pyw
@@ -452,11 +451,12 @@ git push --tags
   macOS is not yet tested but the GUI (Qt) is cross-platform.
 - **No commits yet** — the repo is in its initial uncommitted state. The first
   commit should establish `main` with the current tree.
-- **RAWG currently unreachable** — as of 2025-08-16 the RAWG API returns HTTP
-  522. The merge step is skipped silently; ESRB ratings, genres, descriptions,
-  and developers still populate from TheGamesDB, but `user_rating`,
-  `metacritic_score`, and `cover_url` stay empty until RAWG recovers. A rescan
-  will pick them up automatically.
+- **RAWG is the primary source** — as of 2026-08-18 RAWG's API is active
+  again and serves as the primary metadata source. TheGamesDB is now the
+  fallback, and its merge step fills in `esrb_rating` and `thegamesdb_id`
+  after RAWG succeeds. If RAWG becomes unreachable again, TGDB takes over
+  as the fallback and `user_rating`/`metacritic_score`/`website` stay empty
+  until RAWG recovers. A rescan picks them up automatically.
 - **TheGamesDB null fields** — TGDB returns `null` (not `[]`) for
   `developers` / `publishers` / `genres` when a game has none. All `.get()`
   calls on list fields use the `(value or [])` pattern; new code touching TGDB
