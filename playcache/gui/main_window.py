@@ -190,7 +190,8 @@ class MainWindow(QMainWindow):
         startup they're unknown. We make a lightweight call to ``/Genres``
         (which we need cached anyway) to populate both the genre cache and the
         quota, then refresh the status bar. Runs on a background thread to
-        avoid blocking the UI.
+        avoid blocking the UI. TGDB is now the fallback provider, but its
+        quota is still displayed in the status bar.
         """
         from PySide6.QtCore import QThread
 
@@ -659,6 +660,7 @@ class MainWindow(QMainWindow):
 
     def _on_refetch_progress(self, idx: int, total: int, message: str) -> None:
         self.statusBar().showMessage(f"[{idx}/{total}] {message}")
+        self._update_status_bar()
 
     def _on_refetch_finished(self, summary: dict) -> None:
         self._refresh_table()
@@ -944,7 +946,13 @@ class MainWindow(QMainWindow):
         ok = stats["by_status"].get("ok", 0)
         not_found = stats["by_status"].get("not_found", 0)
         error = stats["by_status"].get("error", 0)
-        rawg = "RAWG: on" if self._cataloger.rawg.is_available() else "RAWG: off"
+        rawg_client = self._cataloger.rawg
+        if rawg_client.is_available():
+            rawg = f"RAWG: {rawg_client.request_count} calls"
+            rawg_tip = f"RAWG — {rawg_client.request_count} API calls this session"
+        else:
+            rawg = "RAWG: off"
+            rawg_tip = "RAWG — API key not configured"
         tgdb_client = self._cataloger.tgdb
         if tgdb_client.is_available():
             q = tgdb_client.quota_info()
@@ -957,7 +965,7 @@ class MainWindow(QMainWindow):
                 if reset is not None:
                     tip += f" (resets in {self._fmt_duration(reset)})"
                 if rem == 0:
-                    tip += " — quota exhausted; wait for reset or use RAWG fallback"
+                    tip += " — quota exhausted"
             else:
                 tgdb = "TGDB: on"
                 tip = "TheGamesDB — quota not yet fetched"
@@ -966,9 +974,9 @@ class MainWindow(QMainWindow):
             tip = "TheGamesDB — API key not configured"
         self._status_label.setText(
             f"{total} games | {ok} ok | {not_found} not found | {error} errors | "
-            f"{tgdb} (primary) | {rawg} (fallback)"
+            f"{rawg} (primary) | {tgdb} (fallback)"
         )
-        self._status_label.setToolTip(tip)
+        self._status_label.setToolTip(f"{rawg_tip}\n{tip}")
 
     @staticmethod
     def _fmt_duration(seconds: int) -> str:

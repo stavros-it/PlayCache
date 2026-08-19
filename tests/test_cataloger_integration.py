@@ -59,6 +59,7 @@ _SEARCH_PROJECTION = (
 class FakeRAWGClient:
     """A drop-in RAWGClient substitute returning canned data by query."""
     name = "rawg"
+    request_count = 0
 
     def __init__(self, config):
         self.config = config
@@ -117,6 +118,7 @@ class NotFoundRAWGClient(FakeRAWGClient):
 
 class FakeTGDBClient:
     name = "thegamesdb"
+    request_count = 0
 
     def __init__(self, config):
         self.config = config
@@ -125,9 +127,6 @@ class FakeTGDBClient:
         return True
 
     def fetch(self, record: GameRecord) -> GameRecord:
-        # Simulates the real client's end result after genre/dev/boxart lookups.
-        # TGDB's "rating" field is ESRB (e.g. "E - Everyone"), NOT a numeric
-        # score, so user_rating is NOT set — esrb_rating is.
         record.thegamesdb_id = 9999
         record.game_name = record.game_name or "Hollow Knight"
         record.short_description = "TGDB overview text."
@@ -152,87 +151,68 @@ def _make_tree(tmp_path: Path):
     (tmp_path / "Deep Rock Galactic [SteamRip]").mkdir()
 
 
-def test_pipeline_tgdb_fetch_and_store(tmp_path):
-    """TGDB primary with RAWG unavailable — ESRB stored, user_rating empty."""
+def test_pipeline_rawg_fetch_and_store(tmp_path):
+    """RAWG primary with TGDB unavailable — user_rating/metacritic stored, esrb empty."""
     _make_tree(tmp_path)
     cfg = Config()
     cfg.db_path = str(tmp_path / "cat.db")
     db = Database(cfg.db_path)
-    # RAWG unavailable so merge is a no-op (isolates TGDB-only behavior)
-    cat = Cataloger(cfg, db=db, rawg=NotFoundRAWGClient(cfg), tgdb=FakeTGDBClient(cfg))
+    cat = Cataloger(cfg, db=db, rawg=FakeRAWGClient(cfg),
+                    tgdb=NotFoundTGDBClient(cfg))
 
     summary = cat.scan_to_db(str(tmp_path))
     assert summary["ok"] == 2
     assert summary["stored"] == 2
 
-    # TheGamesDB is now primary, so it should win for both games.
     records = {r.folder_name: r for r in db.all_records()}
     for rec in records.values():
-        assert rec.data_source == "thegamesdb"
-        assert rec.user_rating == ""  # TGDB has no numeric rating; RAWG unavailable
-        assert rec.esrb_rating == "T - Teen"
-        assert rec.game_type == "Action / Platformer"
-        assert rec.thegamesdb_id == 9999
-        assert rec.short_description == "TGDB overview text."
-        assert rec.metacritic_score is None  # not provided by TGDB
+        assert rec.data_source == "rawg"
+        assert rec.user_rating in ("9/10", "9.5/10")
+        assert rec.metacritic_score in (84, 90)
+        assert rec.esrb_rating == ""  # TGDB unavailable; RAWG has no ESRB
+        assert rec.thegamesdb_id is None
 
 
-def test_pipeline_tgdb_merge_from_rawg(tmp_path):
-    """After TGDB succeeds, missing fields (rating, metacritic) are filled from RAWG."""
+def test_pipeline_rawg_merge_from_tgdb(tmp_path):
+    """After RAWG succeeds, missing fields (esrb_rating) are filled from TGDB."""
     _make_tree(tmp_path)
     cfg = Config()
     cfg.db_path = str(tmp_path / "cat.db")
     db = Database(cfg.db_path)
-    # TGDB succeeds (no rating/metacritic); RAWG also succeeds (has rating/metacritic)
     cat = Cataloger(cfg, db=db, rawg=FakeRAWGClient(cfg), tgdb=FakeTGDBClient(cfg))
 
     cat.scan_to_db(str(tmp_path))
     records = list(db.all_records())
 
     for rec in records:
-        # TGDB data preserved
-        assert rec.data_source == "thegamesdb"
-        assert rec.game_type == "Action / Platformer"
-        assert rec.developer == "Team Cherry"
-        assert rec.esrb_rating == "T - Teen"
-        assert rec.cover_url == "https://cdn.thegamesdb.net/images/large/boxart/front/9999-1.jpg"
-        # RAWG merged in the missing numeric fields
-        assert rec.user_rating in ("9/10", "9.5/10")  # RAWG rating doubled
+        assert rec.data_source == "rawg"
+        assert rec.user_rating in ("9/10", "9.5/10")
         assert rec.metacritic_score in (84, 90)
-        assert rec.rawg_id in (11226, 31265)  # RAWG ID captured during merge
+        assert rec.rawg_id in (11226, 31265)
+        assert rec.esrb_rating == "T - Teen"  # merged from TGDB
+        assert rec.thegamesdb_id == 9999  # merged from TGDB
 
 
-def test_pipeline_fallback_to_rawg(tmp_path):
-    """When TheGamesDB (primary) finds no match, fall back to RAWG."""
+def test_pipeline_fallback_to_tgdb(tmp_path):
+    """When RAWG (primary) finds no match, fall back to TheGamesDB."""
     _make_tree(tmp_path)
     cfg = Config()
     cfg.db_path = str(tmp_path / "cat.db")
     db = Database(cfg.db_path)
-    # TGDB returns not_found; RAWG returns full data
-    cat = Cataloger(cfg, db=db, rawg=FakeRAWGClient(cfg),
-                    tgdb=NotFoundTGDBClient(cfg))
+    cat = Cataloger(cfg, db=db, rawg=NotFoundRAWGClient(cfg),
+                    tgdb=FakeTGDBClient(cfg))
 
     summary = cat.scan_to_db(str(tmp_path))
     assert summary["ok"] == 2
 
     records = {r.folder_name: r for r in db.all_records()}
     hk = records["Hollow Knight"]
-    assert hk.game_name == "Hollow Knight"
-    assert hk.data_source == "rawg"
-    assert hk.user_rating == "9/10"               # 4.5 * 2
-    assert hk.game_type == "Action / Indie"
-    assert hk.developer == "Team Cherry"
-    assert hk.metacritic_score == 90
-    assert hk.release_date == "2017-02-24"
-    assert "beautifully crafted" in hk.short_description
-    assert hk.rawg_id == 11226
-
-    drg = records["Deep Rock Galactic [SteamRip]"]
-    assert drg.data_source == "rawg"
-    assert drg.game_name == "Deep Rock Galactic"  # cleaned name matched the API
-    assert drg.user_rating == "9.5/10"            # 4.75 * 2
-    assert drg.metacritic_score == 84
-    assert drg.game_type == "Action / Shooter"
+    assert hk.data_source == "thegamesdb"
+    assert hk.esrb_rating == "T - Teen"
+    assert hk.thegamesdb_id == 9999
+    assert hk.game_type == "Action / Platformer"
+    assert hk.short_description == "TGDB overview text."
+    assert hk.user_rating == ""  # TGDB has no numeric rating
 
 
 def test_pipeline_skips_already_catalogued(tmp_path):

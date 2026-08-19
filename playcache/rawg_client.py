@@ -1,6 +1,7 @@
 """RAWG API client (https://rawg.io/apidocs).
 
-Free key required (https://rawg.io/apiauth). Used as the primary metadata source.
+Free key required (https://rawg.io/apiauth). Used as the **primary** metadata
+source; TheGamesDB is the fallback when RAWG returns no confident match.
 Response shape (abbreviated):
 
   GET /games?search=...&key=...
@@ -67,6 +68,7 @@ class RAWGClient:
         self.desc_max = config.description_max_chars
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": "playcache/1.0", "Accept": "application/json"})
+        self.request_count: int = 0
 
     # ------------------------------------------------------------------ #
     # Low-level HTTP with retry/backoff
@@ -74,6 +76,7 @@ class RAWGClient:
     def _get(self, path: str, params: dict) -> dict:
         if not self.api_key:
             raise APIKeyMissingError("RAWG")
+        self.request_count += 1
         params = {**params, "key": self.api_key}
         url = f"{BASE_URL}{path}"
         last_exc: Exception | None = None

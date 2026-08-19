@@ -1,7 +1,7 @@
 """TheGamesDB API client (https://api.thegamesdb.net/).
 
-Free key required (https://api.thegamesdb.net/key.php). Primary metadata source;
-RAWG is used as a fallback when TheGamesDB returns no confident match.
+Free key required (https://api.thegamesdb.net/key.php). Used as the **fallback**
+metadata source when RAWG returns no confident match; RAWG is the primary.
 
 Response shape (abbreviated):
 
@@ -65,6 +65,7 @@ class TheGamesDBClient:
         self.remaining_monthly_allowance: int | None = None
         self.extra_allowance: int | None = None
         self.allowance_refresh_timer: int | None = None  # seconds until reset
+        self.request_count: int = 0
 
     def is_available(self) -> bool:
         return bool(self.api_key)
@@ -75,6 +76,7 @@ class TheGamesDBClient:
     def _get(self, path: str, params: dict) -> dict:
         if not self.api_key:
             raise APIKeyMissingError("TheGamesDB")
+        self.request_count += 1
         params = {**params, "apikey": self.api_key}
         url = f"{BASE_URL}{path}"
         last_exc: Exception | None = None

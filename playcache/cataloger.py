@@ -1,4 +1,4 @@
-"""Orchestrates: scan folders -> fetch metadata (TheGamesDB, then RAWG) -> upsert DB."""
+"""Orchestrates: scan folders -> fetch metadata (RAWG, then TheGamesDB) -> upsert DB."""
 from __future__ import annotations
 
 import json
@@ -230,23 +230,23 @@ class Cataloger:
         )
 
     def _fetch(self, record: GameRecord) -> GameRecord:
-        """Try TheGamesDB first; on not_found/error fall back to RAWG.
+        """Try RAWG first; on not_found/error fall back to TheGamesDB.
 
-        After a successful TheGamesDB fetch, also query RAWG to fill in fields
-        that TheGamesDB doesn't provide (numeric user_rating, metacritic_score,
-        cover image, website). This is a no-op when RAWG is unavailable.
+        After a successful RAWG fetch, also query TheGamesDB to fill in fields
+        that RAWG doesn't provide (ESRB rating, TheGamesDB ID). This is a
+        no-op when TheGamesDB is unavailable.
         """
-        # TheGamesDB (primary)
-        if self.tgdb.is_available():
-            record = self.tgdb.fetch(record)
+        # RAWG (primary)
+        if self.rawg.is_available():
+            record = self.rawg.fetch(record)
             if record.fetch_status == "ok":
-                self._merge_from_rawg(record)
+                self._merge_from_tgdb(record)
                 return record
 
-        # Fallback to RAWG
-        if self.rawg.is_available():
+        # Fallback to TheGamesDB
+        if self.tgdb.is_available():
             prev_msg = record.fetch_message
-            record = self.rawg.fetch(record)
+            record = self.tgdb.fetch(record)
             if record.fetch_status == "ok":
                 return record
             if record.fetch_message and prev_msg:
@@ -256,43 +256,32 @@ class Cataloger:
             record.fetch_status = "not_found"
         return record
 
-    def _merge_from_rawg(self, record: GameRecord) -> None:
-        """Fill empty fields from RAWG after TheGamesDB succeeds.
+    def _merge_from_tgdb(self, record: GameRecord) -> None:
+        """Fill empty fields from TheGamesDB after RAWG succeeds.
 
-        TheGamesDB lacks numeric ratings and Metacritic scores, so we query RAWG
-        to fill those (plus cover image / website) when missing. Runs in-place on
-        ``record``. Skipped silently when RAWG is unavailable or returns no match.
-        Does NOT change ``data_source`` — TheGamesDB remains the primary source.
+        RAWG lacks ESRB age ratings, so we query TheGamesDB to fill that (plus
+        the TheGamesDB ID for future re-fetch). Runs in-place on ``record``.
+        Skipped silently when TheGamesDB is unavailable or returns no match.
+        Does NOT change ``data_source`` — RAWG remains the primary source.
         """
-        if not self.rawg.is_available():
+        if not self.tgdb.is_available():
             return
-        # Skip if there's nothing to merge
-        if record.user_rating and record.metacritic_score and record.cover_url and record.website:
+        if record.esrb_rating and record.thegamesdb_id:
             return
-        # Fetch into a throwaway record so RAWG doesn't clobber TGDB data
         probe = GameRecord(
             folder_name=record.folder_name,
             folder_path=record.folder_path,
             game_name=record.game_name or record.folder_name,
         )
-        probe = self.rawg.fetch(probe)
+        probe = self.tgdb.fetch(probe)
         if probe.fetch_status != "ok":
             return
-        # Always capture RAWG IDs for future re-fetch, even if all fields
-        # are already filled by TGDB.
-        if probe.rawg_id:
-            record.rawg_id = probe.rawg_id
-        if probe.rawg_slug:
-            record.rawg_slug = probe.rawg_slug
-        # Fill only empty fields from the RAWG probe
-        if not record.user_rating and probe.user_rating:
-            record.user_rating = probe.user_rating
-        if not record.metacritic_score and probe.metacritic_score:
-            record.metacritic_score = probe.metacritic_score
+        if probe.thegamesdb_id:
+            record.thegamesdb_id = probe.thegamesdb_id
+        if not record.esrb_rating and probe.esrb_rating:
+            record.esrb_rating = probe.esrb_rating
         if not record.cover_url and probe.cover_url:
             record.cover_url = probe.cover_url
-        if not record.website and probe.website:
-            record.website = probe.website
 
     @staticmethod
     def _apply_overrides(record: GameRecord, overrides: dict) -> None:
