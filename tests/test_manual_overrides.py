@@ -105,7 +105,7 @@ class TestCatalogerRespectsOverrides:
         def is_available(self):
             return True
 
-        def fetch(self, record):
+        def fetch(self, record, *, overrides=None):
             # Simulate API data overwriting everything
             record.game_name = "Hollow Knight"
             record.user_rating = "7/10"          # API rating
@@ -124,7 +124,7 @@ class TestCatalogerRespectsOverrides:
         def is_available(self):
             return False
 
-        def fetch(self, record):
+        def fetch(self, record, *, overrides=None):
             return record
 
     def test_rescan_preserves_user_edits(self, tmp_path):

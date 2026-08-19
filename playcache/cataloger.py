@@ -229,7 +229,8 @@ class Cataloger:
             fetch_status="pending",
         )
 
-    def _fetch(self, record: GameRecord, provider: str = "auto") -> GameRecord:
+    def _fetch(self, record: GameRecord, provider: str = "auto",
+               overrides: dict | None = None) -> GameRecord:
         """Fetch metadata for *record*.
 
         Parameters
@@ -239,10 +240,14 @@ class Cataloger:
             after RAWG succeeds.
             ``"rawg"`` — force RAWG only (no fallback, no TGDB merge).
             ``"tgdb"`` — force TheGamesDB only (no fallback, no RAWG merge).
+        overrides
+            The manual overrides dict for this record. When provided, the
+            clients use it to decide whether to fetch by ID (if game_name is
+            NOT overridden) or search by name (if the user corrected it).
         """
         if provider == "rawg":
             if self.rawg.is_available():
-                record = self.rawg.fetch(record)
+                record = self.rawg.fetch(record, overrides=overrides)
                 if record.fetch_status == "ok":
                     self._merge_from_tgdb(record)
                     return record
@@ -255,7 +260,7 @@ class Cataloger:
 
         if provider == "tgdb":
             if self.tgdb.is_available():
-                record = self.tgdb.fetch(record)
+                record = self.tgdb.fetch(record, overrides=overrides)
             else:
                 record.fetch_status = "error"
                 record.fetch_message = "TheGamesDB API key not configured"
@@ -265,14 +270,14 @@ class Cataloger:
 
         # auto: RAWG primary -> TGDB fallback -> merge
         if self.rawg.is_available():
-            record = self.rawg.fetch(record)
+            record = self.rawg.fetch(record, overrides=overrides)
             if record.fetch_status == "ok":
                 self._merge_from_tgdb(record)
                 return record
 
         if self.tgdb.is_available():
             prev_msg = record.fetch_message
-            record = self.tgdb.fetch(record)
+            record = self.tgdb.fetch(record, overrides=overrides)
             if record.fetch_status == "ok":
                 return record
             if record.fetch_message and prev_msg:
@@ -298,6 +303,7 @@ class Cataloger:
             folder_name=record.folder_name,
             folder_path=record.folder_path,
             game_name=record.game_name or record.folder_name,
+            thegamesdb_id=record.thegamesdb_id,
         )
         probe = self.tgdb.fetch(probe)
         if probe.fetch_status != "ok":
