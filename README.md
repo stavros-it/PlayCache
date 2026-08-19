@@ -49,7 +49,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
 ### Metadata sources
 - **RAWG (primary)** — free, requires a key. Provides genres, developers,
   publishers, release date, Metacritic score, numeric user rating, cover
-  image, website, and description. 20,000 requests/day.
+  image, website, and description. 20,000 requests/month.
 - **TheGamesDB (fallback + merge)** — free, optional but recommended. When
   RAWG has no match, TGDB is queried. When RAWG succeeds, TGDB is *also*
   queried in a merge step to fill ESRB age ratings (which RAWG lacks).
@@ -136,7 +136,7 @@ rescan, export to Excel, back up the catalog, view stats, or change settings.
 
 | Provider | Sign-up URL | Notes |
 |----------|-------------|-------|
-| **RAWG** (recommended) | https://rawg.io/ | Primary source. 20,000 requests/day. Requires a free account to get an API key. |
+| **RAWG** (recommended) | https://rawg.io/ | Primary source. 20,000 requests/month. Requires a free account to get an API key. |
 | **TheGamesDB** (optional) | https://thegamesdb.net/ | Fallback + merge. 1000 requests/month. Requires a free account to get an API key. |
 
 Put the keys in `config.ini`, or set environment variables `THEGAMESDB_API_KEY`
