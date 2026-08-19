@@ -268,7 +268,7 @@ TheGamesDB as the fallback.
 - Docs updated across README, PROJECT_CONTEXT, and client docstrings.
 
 **Trade-offs**:
-- RAWG has no monthly quota (20k req/day, effectively unlimited for a
+- RAWG has a generous free tier (20k req/month, effectively unlimited for a
   desktop cataloguer), so the primary path no longer has a quota ceiling.
 - TGDB's ESRB ratings are now filled in the merge step (one extra API call
   per game when TGDB is available). This is a fair trade — ESRB is the only
@@ -862,7 +862,7 @@ overrides per-field.
 
 ### 2025-08-16 — RAWG primary, TheGamesDB fallback *(superseded — see above)*
 Initially chose RAWG as the primary source because it has rich descriptions,
-ratings, and Metacritic scores, with a generous free tier (20k req/day).
+ratings, and Metacritic scores, with a generous free tier (20k req/month).
 TheGamesDB was the fallback. This was later reversed when RAWG became
 unreachable (HTTP 522) and TGDB proved to have richer structured data
 (genres, developers, publishers, ESRB, boxart). IGDB was considered but

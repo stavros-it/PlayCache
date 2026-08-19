@@ -275,7 +275,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
 `skip_folders` (Windows system folders).
 
 **API keys** (in `[rawg]` and `[thegamesdb]` sections of `config.ini`):
-- RAWG — https://rawg.io/ (free, 20k req/day; requires a free account to get
+- RAWG — https://rawg.io/ (free, 20k req/month; requires a free account to get
   an API key). Required — this is the
   primary data source. Key goes in `[rawg] api_key`. The client tracks request
   count per session (shown in the status bar as `RAWG: N calls`).
