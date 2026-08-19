@@ -204,11 +204,43 @@ class TheGamesDBClient:
         time.sleep(self.delay)
         return games, includes
 
-    def fetch(self, record: GameRecord) -> GameRecord:
+    def get_by_id(self, game_id: int) -> tuple[dict | None, dict]:
+        """Return (game, includes) for a direct ID lookup."""
+        data = self._get("/Games/ByGameID", {
+            "id": game_id, "fields": FIELDS, "include": "boxart",
+        })
+        games = (data.get("data") or {}).get("games", []) or []
+        includes = data.get("include") or {}
+        time.sleep(self.delay)
+        return (games[0] if games else None), includes
+
+    def fetch(self, record: GameRecord, *, overrides: dict | None = None) -> GameRecord:
+        """Fetch metadata from TheGamesDB.
+
+        If the record already has a ``thegamesdb_id`` AND the game name has NOT
+        been manually overridden, fetch by ID directly (guarantees the same
+        game). Otherwise, search by name.
+        """
         if not self.api_key:
             record.fetch_status = "error"
             record.fetch_message = "TheGamesDB API key missing"
             return record
+
+        tgdb_id = record.thegamesdb_id
+        name_overridden = bool(overrides and "game_name" in overrides)
+
+        if tgdb_id and not name_overridden:
+            try:
+                game, includes = self.get_by_id(tgdb_id)
+                if game:
+                    self._apply(record, game, includes)
+                    record.fetch_status = "ok"
+                    record.data_source = self.name
+                    record.fetch_message = ""
+                    return record
+                log.warning("TGDB fetch-by-id %s returned no game, falling back to search", tgdb_id)
+            except (requests.RequestException, ValueError, RuntimeError) as e:
+                log.warning("TGDB fetch-by-id %s failed, falling back to search: %s", tgdb_id, e)
 
         query = clean_search_query(record.game_name or record.folder_name)
         if not query:

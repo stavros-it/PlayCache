@@ -79,7 +79,7 @@ class FakeRAWGClient:
     def get_details(self, game_id):
         return dict(RAWG_DB[game_id])
 
-    def fetch(self, record: GameRecord) -> GameRecord:
+    def fetch(self, record: GameRecord, *, overrides: dict | None = None) -> GameRecord:
         query = clean_search_query(record.game_name or record.folder_name)
         results = self.search(query)
         cand = best_match(query, ((r.get("name", ""), r) for r in results),
@@ -126,7 +126,7 @@ class FakeTGDBClient:
     def is_available(self):
         return True
 
-    def fetch(self, record: GameRecord) -> GameRecord:
+    def fetch(self, record: GameRecord, *, overrides: dict | None = None) -> GameRecord:
         record.thegamesdb_id = 9999
         record.game_name = record.game_name or "Hollow Knight"
         record.short_description = "TGDB overview text."
@@ -140,7 +140,7 @@ class FakeTGDBClient:
 
 
 class NotFoundTGDBClient(FakeTGDBClient):
-    def fetch(self, record: GameRecord) -> GameRecord:
+    def fetch(self, record: GameRecord, *, overrides: dict | None = None) -> GameRecord:
         record.fetch_status = "not_found"
         record.fetch_message = f"TGDB: no match for '{record.game_name}'"
         return record

@@ -626,7 +626,8 @@ class MainWindow(QMainWindow):
                     try:
                         overrides = self_inner._cataloger.db.get_overrides(rec.folder_path)
                         rec.fetch_status = "pending"
-                        rec = self_inner._cataloger._fetch(rec, provider=self_inner._provider)
+                        rec = self_inner._cataloger._fetch(rec, provider=self_inner._provider,
+                                                           overrides=overrides)
                         self_inner._cataloger._apply_overrides(rec, overrides)
                         if not rec.store:
                             rec.store = "Other"
@@ -696,7 +697,7 @@ class MainWindow(QMainWindow):
             row = rows[0]
             overrides = self._db.get_overrides(record.folder_path)
             record.fetch_status = "pending"
-            record = self._cataloger._fetch(record, provider=provider)
+            record = self._cataloger._fetch(record, provider=provider, overrides=overrides)
             self._cataloger._apply_overrides(record, overrides)
             if not record.store:
                 record.store = "Other"

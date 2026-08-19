@@ -143,8 +143,13 @@ class RAWGClient:
         time.sleep(self.delay)
         return data
 
-    def fetch(self, record: GameRecord) -> GameRecord:
+    def fetch(self, record: GameRecord, *, overrides: dict | None = None) -> GameRecord:
         """Search RAWG for the game and populate ``record`` with metadata.
+
+        If the record already has a ``rawg_id`` AND the game name has NOT been
+        manually overridden, fetch by ID directly (guarantees the same game).
+        Otherwise, search by name (the user may have corrected it to find a
+        different game).
 
         Returns the (mutated) record. On no match, sets fetch_status='not_found'.
         """
@@ -153,6 +158,20 @@ class RAWGClient:
             record.data_source = ""
             record.fetch_message = "RAWG API key missing"
             return record
+
+        rawg_id = record.rawg_id
+        name_overridden = bool(overrides and "game_name" in overrides)
+
+        if rawg_id and not name_overridden:
+            try:
+                detail = self.get_details(rawg_id)
+                self._apply(record, detail)
+                record.fetch_status = "ok"
+                record.data_source = self.name
+                record.fetch_message = ""
+                return record
+            except (requests.RequestException, ValueError, RuntimeError) as e:
+                log.warning("RAWG fetch-by-id %s failed, falling back to search: %s", rawg_id, e)
 
         query = clean_search_query(record.game_name or record.folder_name)
         if not query:
@@ -176,8 +195,6 @@ class RAWGClient:
             return record
 
         game_id = candidate.get("id")
-        # Only fetch details for a valid integer id (avoid URL injection on
-        # malformed API responses with string ids).
         valid_id = isinstance(game_id, int) and game_id > 0
         try:
             detail = self.get_details(game_id) if valid_id else candidate
