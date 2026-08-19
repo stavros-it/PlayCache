@@ -1,6 +1,6 @@
 """RAWG API client (https://rawg.io/apidocs).
 
-Free key required (https://rawg.io/apiauth). Used as the **primary** metadata
+Free key required (https://rawg.io/, requires a free account registration). Used as the **primary** metadata
 source; TheGamesDB is the fallback when RAWG returns no confident match.
 Response shape (abbreviated):
 

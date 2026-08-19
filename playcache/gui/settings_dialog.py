@@ -69,7 +69,7 @@ class SettingsDialog(QDialog):
         else:
             self.rawg_key = QLineEdit(config.rawg_api_key)
             self.rawg_key.setEchoMode(QLineEdit.EchoMode.Password)
-            self.rawg_key.setPlaceholderText("Optional fallback key (rawg.io/apiauth)")
+            self.rawg_key.setPlaceholderText("Get a FREE key at rawg.io")
         form.addRow("RAWG API key:", self.rawg_key)
 
         if self._tgdb_from_env:
@@ -80,7 +80,7 @@ class SettingsDialog(QDialog):
         else:
             self.tgdb_key = QLineEdit(config.thegamesdb_api_key)
             self.tgdb_key.setEchoMode(QLineEdit.EchoMode.Password)
-            self.tgdb_key.setPlaceholderText("Primary source — get a key at api.thegamesdb.net/key.php")
+            self.tgdb_key.setPlaceholderText("Get a FREE key at thegamesdb.net")
         form.addRow("TheGamesDB API key:", self.tgdb_key)
 
         self.delay = QDoubleSpinBox()
