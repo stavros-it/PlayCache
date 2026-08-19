@@ -229,21 +229,47 @@ class Cataloger:
             fetch_status="pending",
         )
 
-    def _fetch(self, record: GameRecord) -> GameRecord:
-        """Try RAWG first; on not_found/error fall back to TheGamesDB.
+    def _fetch(self, record: GameRecord, provider: str = "auto") -> GameRecord:
+        """Fetch metadata for *record*.
 
-        After a successful RAWG fetch, also query TheGamesDB to fill in fields
-        that RAWG doesn't provide (ESRB rating, TheGamesDB ID). This is a
-        no-op when TheGamesDB is unavailable.
+        Parameters
+        ----------
+        provider
+            ``"auto"`` (default) — RAWG first, TheGamesDB fallback, merge step
+            after RAWG succeeds.
+            ``"rawg"`` — force RAWG only (no fallback, no TGDB merge).
+            ``"tgdb"`` — force TheGamesDB only (no fallback, no RAWG merge).
         """
-        # RAWG (primary)
+        if provider == "rawg":
+            if self.rawg.is_available():
+                record = self.rawg.fetch(record)
+                if record.fetch_status == "ok":
+                    self._merge_from_tgdb(record)
+                    return record
+            else:
+                record.fetch_status = "error"
+                record.fetch_message = "RAWG API key not configured"
+            if record.fetch_status not in ("ok", "not_found", "error"):
+                record.fetch_status = "not_found"
+            return record
+
+        if provider == "tgdb":
+            if self.tgdb.is_available():
+                record = self.tgdb.fetch(record)
+            else:
+                record.fetch_status = "error"
+                record.fetch_message = "TheGamesDB API key not configured"
+            if record.fetch_status not in ("ok", "not_found", "error"):
+                record.fetch_status = "not_found"
+            return record
+
+        # auto: RAWG primary -> TGDB fallback -> merge
         if self.rawg.is_available():
             record = self.rawg.fetch(record)
             if record.fetch_status == "ok":
                 self._merge_from_tgdb(record)
                 return record
 
-        # Fallback to TheGamesDB
         if self.tgdb.is_available():
             prev_msg = record.fetch_message
             record = self.tgdb.fetch(record)

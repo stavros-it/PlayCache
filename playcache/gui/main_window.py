@@ -588,15 +588,13 @@ class MainWindow(QMainWindow):
     def _run_refetch_all(self) -> None:
         self._run_refetch(list(self._db.all_records()))
 
-    def _run_refetch(self, records: list[GameRecord]) -> None:
+    def _run_refetch(self, records: list[GameRecord], provider: str = "auto") -> None:
         """Re-fetch metadata for *records* on a background thread.
 
         Shared by "Rescan All" and multi-row "Re-fetch selected". Single-row
         refetch stays synchronous (see ``_refetch_selected``) for instant
         detail-panel feedback; 2+ rows use this worker to avoid freezing the UI.
         """
-        # Guard against concurrent refetch workers: a running worker would be
-        # orphaned and could race on the DB / API clients.
         if getattr(self, "_refetch_worker", None) and self._refetch_worker.isRunning():
             QMessageBox.warning(
                 self, "Busy",
@@ -609,10 +607,11 @@ class MainWindow(QMainWindow):
             progress = Signal(int, int, str)
             finished_summary = Signal(dict)
 
-            def __init__(self_inner, cataloger, recs, parent=None):
+            def __init__(self_inner, cataloger, recs, prov, parent=None):
                 super().__init__(parent)
                 self_inner._cataloger = cataloger
                 self_inner._records = recs
+                self_inner._provider = prov
                 self_inner._cancelled = False
 
             def cancel(self_inner):
@@ -627,7 +626,7 @@ class MainWindow(QMainWindow):
                     try:
                         overrides = self_inner._cataloger.db.get_overrides(rec.folder_path)
                         rec.fetch_status = "pending"
-                        rec = self_inner._cataloger._fetch(rec)
+                        rec = self_inner._cataloger._fetch(rec, provider=self_inner._provider)
                         self_inner._cataloger._apply_overrides(rec, overrides)
                         if not rec.store:
                             rec.store = "Other"
@@ -651,10 +650,9 @@ class MainWindow(QMainWindow):
                     {"ok": ok, "not_found": not_found, "error": error, "total": total}
                 )
 
-        self._refetch_worker = RefetchWorker(self._cataloger, records, parent=self)
+        self._refetch_worker = RefetchWorker(self._cataloger, records, provider, parent=self)
         self._refetch_worker.progress.connect(self._on_refetch_progress)
         self._refetch_worker.finished_summary.connect(self._on_refetch_finished)
-        # Self-cleanup: delete the QThread when done so old workers don't linger.
         self._refetch_worker.finished.connect(self._refetch_worker.deleteLater)
         self._refetch_worker.start()
 
@@ -673,7 +671,7 @@ class MainWindow(QMainWindow):
             f"  Errors: {summary.get('error', 0)}",
         )
 
-    def _refetch_selected(self) -> None:
+    def _refetch_selected(self, provider: str = "auto") -> None:
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
             return
@@ -698,7 +696,7 @@ class MainWindow(QMainWindow):
             row = rows[0]
             overrides = self._db.get_overrides(record.folder_path)
             record.fetch_status = "pending"
-            record = self._cataloger._fetch(record)
+            record = self._cataloger._fetch(record, provider=provider)
             self._cataloger._apply_overrides(record, overrides)
             if not record.store:
                 record.store = "Other"
@@ -706,13 +704,13 @@ class MainWindow(QMainWindow):
             self._model.update_record(row, record)
             self.detail.set_record(record, row=row)
             self._update_status_bar()
+            label = {"auto": "auto", "rawg": "RAWG", "tgdb": "TGDB"}.get(provider, provider)
             self.statusBar().showMessage(
-                f"Re-fetched: {record.data_source or '?'} {record.fetch_status}",
+                f"Re-fetched ({label}): {record.data_source or '?'} {record.fetch_status}",
                 4000,
             )
         else:
-            # Multiple rows: background worker with progress in status bar.
-            self._run_refetch(records)
+            self._run_refetch(records, provider=provider)
 
     def _export_xlsx(self) -> None:
         default_name = str(Path(self._config.db_path).with_suffix(".xlsx"))
@@ -868,11 +866,18 @@ class MainWindow(QMainWindow):
         if not records:
             return
         n = len(records)
+        rawg_on = self._cataloger.rawg.is_available()
+        tgdb_on = self._cataloger.tgdb.is_available()
 
         menu = QMenu(self)
-        refetch_action = menu.addAction(
+        refetch_menu = menu.addMenu(
             "Re-fetch metadata" if n == 1 else f"Re-fetch {n} games"
         )
+        auto_action = refetch_menu.addAction("Auto (RAWG → TGDB)")
+        rawg_action = refetch_menu.addAction("From RAWG only")
+        rawg_action.setEnabled(rawg_on)
+        tgdb_action = refetch_menu.addAction("From TheGamesDB only")
+        tgdb_action.setEnabled(tgdb_on)
         open_folder_action = None
         if n == 1 and not records[0].folder_path.startswith("/manual/"):
             file_manager = "Explorer" if sys.platform == "win32" else "Files"
@@ -883,8 +888,12 @@ class MainWindow(QMainWindow):
         )
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
 
-        if action == refetch_action:
-            self._refetch_selected()
+        if action == auto_action:
+            self._refetch_selected(provider="auto")
+        elif action == rawg_action:
+            self._refetch_selected(provider="rawg")
+        elif action == tgdb_action:
+            self._refetch_selected(provider="tgdb")
         elif open_folder_action is not None and action == open_folder_action:
             self._open_folder(records[0])
         elif action == delete_action:
