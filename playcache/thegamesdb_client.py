@@ -1,6 +1,6 @@
 """TheGamesDB API client (https://api.thegamesdb.net/).
 
-Free key required (https://api.thegamesdb.net/key.php). Used as the **fallback**
+Free key required (https://thegamesdb.net/, requires a free account registration). Used as the **fallback**
 metadata source when RAWG returns no confident match; RAWG is the primary.
 
 Response shape (abbreviated):

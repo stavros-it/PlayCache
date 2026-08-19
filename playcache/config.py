@@ -127,7 +127,7 @@ class Config:
     def require_rawg(self) -> None:
         if not self.rawg_api_key:
             raise APIKeyMissingError(
-                "RAWG API key is not set. Get a FREE key at https://rawg.io/apiauth "
+                "RAWG API key is not set. Get a FREE key at https://rawg.io/ "
                 "and put it in config.ini under [rawg] api_key, "
                 "or set the RAWG_API_KEY environment variable."
             )

@@ -136,8 +136,8 @@ rescan, export to Excel, back up the catalog, view stats, or change settings.
 
 | Provider | Sign-up URL | Notes |
 |----------|-------------|-------|
-| **RAWG** (recommended) | https://rawg.io/apiauth | Primary source. 20,000 requests/day. |
-| **TheGamesDB** (optional) | https://api.thegamesdb.net/login | Fallback + merge. 1000 requests/month. |
+| **RAWG** (recommended) | https://rawg.io/ | Primary source. 20,000 requests/day. Requires a free account to get an API key. |
+| **TheGamesDB** (optional) | https://thegamesdb.net/ | Fallback + merge. 1000 requests/month. Requires a free account to get an API key. |
 
 Put the keys in `config.ini`, or set environment variables `THEGAMESDB_API_KEY`
 and `RAWG_API_KEY` (or `PLAYCACHE_THEGAMESDB_API_KEY` /
