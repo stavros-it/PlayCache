@@ -275,18 +275,20 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
 `skip_folders` (Windows system folders).
 
 **API keys** (in `[rawg]` and `[thegamesdb]` sections of `config.ini`):
-- RAWG — https://rawg.io/ (free, 20k req/month; requires a free account to get
-  an API key). Required — this is the
+- RAWG — https://rawg.io/ (free, 20k req/month, renews monthly; requires a free
+  account to get an API key). Required — this is the
   primary data source. Key goes in `[rawg] api_key`. The client tracks request
-  count per session (shown in the status bar as `RAWG: N calls`).
-- TheGamesDB — https://thegamesdb.net/ (free, 1000 req/month; requires a free
-  account to get an API key).
+  count per session (shown in the status bar as `RAWG: N calls`). RAWG's API
+  does **not** return rate-limit data in responses, so the true remaining quota
+  is only visible on the RAWG dashboard.
+- TheGamesDB — https://thegamesdb.net/ (free, 1000 req/month, renews monthly;
+  requires a free account to get an API key).
   Optional but **recommended** — fills `esrb_rating` and `thegamesdb_id` in the
   merge step after RAWG succeeds, and serves as the fallback when RAWG has no
-  match. Key goes in `[thegamesdb] api_key`. Public-tier limit is 1000
-  requests/month; the API returns `remaining_monthly_allowance`,
-  `extra_allowance`, and `allowance_refresh_timer` with each response, which
-  the client captures and the status bar displays (e.g. `TGDB: 890/1000`).
+  match. Key goes in `[thegamesdb] api_key`. The API returns
+  `remaining_monthly_allowance`, `extra_allowance`, and
+  `allowance_refresh_timer` with each response, which the client captures and
+  the status bar displays (e.g. `TGDB: 890/1000`).
 
 ## 7. Key conventions
 

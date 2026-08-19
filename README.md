@@ -145,6 +145,21 @@ and `RAWG_API_KEY` (or `PLAYCACHE_THEGAMESDB_API_KEY` /
 scans and records folder names (marked `not_found`) so you can fill metadata
 later. You can also set keys from the GUI via **Settings…**.
 
+### API limits and the status bar
+
+| Provider | Free-tier limit | Renewal | Status bar shows | How to check remaining |
+|----------|----------------|---------|-------------------|-----------------------|
+| **RAWG** | 20,000 requests | Monthly (same day next month) | `RAWG: N calls (primary)` | [rawg.io](https://rawg.io/) → your dashboard. The API does **not** return quota data in responses. |
+| **TheGamesDB** | 1,000 requests | Monthly (1st of month) | `TGDB: M/1000 (fallback)` | Displayed automatically — TGDB returns `remaining_monthly_allowance` with every API response. |
+
+- The **RAWG** counter resets to zero each time you launch PlayCache (it tracks
+  calls made in the current session only). To see your true remaining quota,
+  check your RAWG dashboard.
+- The **TheGamesDB** counter reflects the server-side remaining quota, which
+  is accurate across sessions.
+- Both providers retry on `429 Too Many Requests` with exponential backoff and
+  honor the `Retry-After` header. 4xx errors are not retried.
+
 ## Using the GUI
 
 | Action | How |
