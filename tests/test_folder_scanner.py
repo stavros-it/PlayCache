@@ -439,6 +439,7 @@ class TestInstallerNameDetection:
         assert result == "Hollow Knight"
 
     def test_installer_in_linux_sh_form(self, tmp_path):
+        import os
         import sys
 
         import pytest
@@ -447,7 +448,9 @@ class TestInstallerNameDetection:
             pytest.skip(".sh installers are only scanned on Linux")
         folder = tmp_path / "123"
         folder.mkdir()
-        (folder / "hollow-knight-setup.sh").write_text("x")
+        sh = folder / "hollow-knight-setup.sh"
+        sh.write_text("x")
+        os.chmod(sh, 0o755)
         result = smart_detect_game_name(folder, clean_folder_name(folder.name))
         assert result == "Hollow Knight"
 
