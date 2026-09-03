@@ -35,6 +35,7 @@ from .about_dialog import AboutDialog
 from .detail_panel import DetailPanel
 from .duplicates_dialog import DuplicatesDialog
 from .item_delegate import GamesItemDelegate
+from .qtutils import worker_is_running
 from .scan_dialog import ScanDialog
 from .settings_dialog import SettingsDialog
 from .stats_dialog import StatsDialog
@@ -595,7 +596,7 @@ class MainWindow(QMainWindow):
         refetch stays synchronous (see ``_refetch_selected``) for instant
         detail-panel feedback; 2+ rows use this worker to avoid freezing the UI.
         """
-        if getattr(self, "_refetch_worker", None) and self._refetch_worker.isRunning():
+        if worker_is_running(getattr(self, "_refetch_worker", None)):
             QMessageBox.warning(
                 self, "Busy",
                 "A re-fetch is already running. Please wait for it to finish.",
@@ -654,8 +655,14 @@ class MainWindow(QMainWindow):
         self._refetch_worker = RefetchWorker(self._cataloger, records, provider, parent=self)
         self._refetch_worker.progress.connect(self._on_refetch_progress)
         self._refetch_worker.finished_summary.connect(self._on_refetch_finished)
-        self._refetch_worker.finished.connect(self._refetch_worker.deleteLater)
+        self._refetch_worker.finished.connect(self._on_refetch_thread_finished)
         self._refetch_worker.start()
+
+    def _on_refetch_thread_finished(self) -> None:
+        worker = self.sender()
+        worker.deleteLater()
+        if getattr(self, "_refetch_worker", None) is worker:
+            self._refetch_worker = None
 
     def _on_refetch_progress(self, idx: int, total: int, message: str) -> None:
         self.statusBar().showMessage(f"[{idx}/{total}] {message}")
@@ -676,7 +683,7 @@ class MainWindow(QMainWindow):
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
             return
-        if getattr(self, "_refetch_worker", None) and self._refetch_worker.isRunning():
+        if worker_is_running(getattr(self, "_refetch_worker", None)):
             QMessageBox.warning(
                 self, "Busy",
                 "A re-fetch is already running. Please wait for it to finish.",
@@ -799,7 +806,7 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         # Guard against swapping API clients while a worker thread is mid-scan.
-        if getattr(self, "_refetch_worker", None) and self._refetch_worker.isRunning():
+        if worker_is_running(getattr(self, "_refetch_worker", None)):
             QMessageBox.warning(
                 self, "Busy",
                 "A re-fetch is running. Please wait for it to finish before "
@@ -1008,12 +1015,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def closeEvent(self, event) -> None:
         worker = getattr(self, "_refetch_worker", None)
-        if worker and worker.isRunning():
+        if worker_is_running(worker):
             worker.cancel()
             if not worker.wait(5000):
                 worker.terminate()
                 worker.wait(2000)
         quota_worker = getattr(self, "_quota_worker", None)
-        if quota_worker and quota_worker.isRunning():
+        if worker_is_running(quota_worker):
             quota_worker.wait(5000)
         event.accept()
