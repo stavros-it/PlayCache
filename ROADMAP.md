@@ -73,6 +73,18 @@
   deleted` before `reject()` / `event.accept()` ran). References are now
   cleared on thread finish and all `isRunning()` guards tolerate dead wrappers
   (`qtutils.worker_is_running`). 168 tests passing, ruff clean.
+- ✅ Evidence-based game-name detection (2026-09-03) — installer filenames in
+  any shape (`Name-Setup.exe`, `name_installer.exe`, `DoomEternalSetup.exe`,
+  repack installers with group names stripped), Windows PE
+  ProductName/FileDescription of the largest exes (rescues bare `setup.exe`
+  repacks and generic `game.exe` binaries), parent-folder fallback for
+  generic folder names, and one-level-deeper exe search for multi-disc
+  layouts. Candidates are scored (source weight x title-quality + agreement
+  bonus) instead of a rigid priority chain.
+- ✅ Post-scan duplicate purge — after a scan dialog closes, exact-name
+  (case-insensitive) duplicates are removed automatically, keeping the most
+  complete copy (ok status → most fields → newest). Fuzzy duplicates stay
+  manual via Find Duplicates… 191 tests passing, ruff clean.
 
 ## Priorities
 
@@ -249,6 +261,54 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-03 — Evidence-based game-name detection + post-scan duplicate purge
+
+**Trigger**: user asked for game names to be obtained from exe filenames
+during folder scans — including installer exes — and for duplicates retrieved
+by a scan to be purged automatically. After review, a fixed pattern list was
+rejected as unable to "cover all circumstances"; the user approved an
+evidence-scoring design.
+
+**Detection changes** (`folder_scanner.py`):
+- `smart_detect_game_name` keeps Steam manifest → GOG metadata → GOG setup
+  exe as authoritative sources, then replaces the old folder-name/exe-stem
+  priority chain with `_best_name_from_evidence`.
+- Installer filenames of any shape are parsed (`_looks_like_installer` +
+  `_clean_installer_name`): separated tokens (`Hollow Knight-Setup.exe`),
+  CamelCase-attached suffixes (`DoomEternalSetup.exe`), repack-group names
+  (fitgirl/dodi/elamigos/…) stripped, dotted versions and `(id)` tags dropped.
+- **PE VERSIONINFO reading** (`_read_pe_metadata`, Windows-only ctypes
+  `version.dll`) extracts `ProductName`/`FileDescription` from the ≤3 largest
+  executables — the only signal that works when BOTH the folder name and the
+  filename are useless (bare `setup.exe` repacks, `game.exe`, `main.exe`).
+- Executables are searched one subfolder level deeper when the top level
+  yields nothing (multi-disc layouts); the parent folder name is a last-resort
+  candidate only when the folder name itself is junk.
+- Candidates score `source weight × _title_quality` (junk-token penalties,
+  word-count curve) + 0.10 when two sources agree; plain exe stems (0.55)
+  rank below the folder name (0.60) so exe names only fill gaps, per the
+  user's choice. `_find_game_exes` was superseded by the shared
+  `_collect_exe_paths` walker and removed.
+
+**Purge** (`db.py` + `main_window.py`):
+- `Database.purge_exact_duplicates()` removes rows sharing an exact
+  case-insensitive `game_name`, keeping the most complete copy (fetch_status
+  ok → most populated fields incl. manual overrides → newest updated_at);
+  empty-name rows are never grouped, and at least one copy always survives.
+- Called in `_open_scan_dialog` after the dialog closes; failures are logged
+  and never block the table refresh. Fuzzy duplicates remain manual.
+
+**Tests** (23 added, 168 → 191): installer shapes, repack stripping, bare
+`setup.exe` fallback, PE rescue/beat-stem/junk-rejection (PE monkeypatched —
+CI never touches ctypes), depth-2 search, parent fallback, and 9 purge tests
+including the never-remove-all and override-completeness cases.
+
+**Trade-offs**: installer names drop intra-word hyphens (`Half-Life-Setup` →
+`Half Life`) — fine for API search, not for display. PE reading is
+Windows-only (ELF has no standard title metadata). `_title_quality` is
+heuristic; a wrong-but-plausible candidate can still win and end up
+`not_found` after the API call — the manual-overrides flow covers it.
 
 ### 2026-09-03 — Fix: windows stopped closing after a finished scan
 

@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import re
+import struct
 import sys
 import unicodedata
 from collections.abc import Iterator
@@ -151,6 +152,31 @@ _GOG_SETUP_NOISE = {
 
 # Subdirs that never contain the game executable
 _SKIP_SUBDIRS = {"data", "cache", "logs", "temp", "__pycache__", ".git"}
+
+# Installer filename markers: an executable whose name carries one of these
+# tokens (separated, or as a CamelCase suffix like "DoomEternalSetup") embeds
+# the game title in the rest of the filename.
+_INSTALL_TOKENS = {"setup", "install", "installer", "installshield", "repack", "unpacked"}
+
+# Repack/scene group names that appear in installer filenames but are NOT
+# the game title.
+_REPACK_GROUPS = {
+    "fitgirl", "dodi", "elamigos", "kaos", "masquerade", "goldberg",
+    "prophet", "codex", "cpy", "plaza", "hoodlum", "skidrow", "reloaded",
+    "razor1911", "onlinefix", "online", "fix", "steamrip", "xatab",
+    "r.g.", "mechanics", "anomaly", "gog", "steam", "epic", "cs.rin",
+}
+
+# Tokens that make a candidate string look like junk rather than a title.
+_JUNK_TOKENS = _INSTALL_TOKENS | _REPACK_GROUPS | {
+    "unins", "uninstall", "unins000", "redist", "update", "updates",
+    "build", "version", "ver", "crack", "cracked", "full", "final",
+    "patch", "dlc", "demo", "beta", "alpha", "activated", "preinstalled",
+    "program", "application", "app", "windows", "win64", "win32", "x64",
+    "x86", "games", "game", "library", "common", "binaries", "bin",
+    "disc", "disk", "cd", "dvd", "iso", "unity", "unityplayer", "unreal",
+    "godot", "gamemaker", "wine", "proton", "dx", "vk", "directx",
+}
 
 
 @dataclass
@@ -479,56 +505,92 @@ def _is_linux_executable(entry: Path) -> bool:
     return False
 
 
-def _find_game_exes(folder: Path, max_depth: int = 1) -> list[tuple[str, int]]:
-    """Find executable files that are likely the game binary (not launchers).
+def _is_game_binary_file(entry: Path) -> bool:
+    """True if this file could be a game/installer executable on this platform."""
+    suffix = entry.suffix.lower()
+    if sys.platform == "win32":
+        return suffix == ".exe"
+    if suffix == ".exe":
+        return True  # Wine/Proton games
+    return _is_linux_executable(entry)
 
-    Returns list of ``(cleaned_name, file_size)`` sorted by size descending.
-    Searches the immediate folder and one level of subfolders (skipping
-    ``data/``, ``cache/``, etc.).
 
-    On Windows, scans for ``.exe`` files. On Linux, also detects ELF binaries,
-    ``.AppImage``, ``.sh``, and ``.bin`` files with the executable bit set.
-    """
-    exes: list[tuple[str, int]] = []
+def _exe_files_at_depth(folder: Path, max_depth: int) -> list[Path]:
+    """Collect executable files up to *max_depth* subfolder levels."""
+    out: list[Path] = []
 
-    def _is_game_binary(entry: Path) -> bool:
-        """True if this file could be a game executable on this platform."""
-        suffix = entry.suffix.lower()
-        if sys.platform == "win32":
-            return suffix == ".exe"
-        if suffix == ".exe":
-            return True  # Wine/Proton games
-        return _is_linux_executable(entry)
-
-    def _scan_dir(d: Path, depth: int) -> None:
+    def _scan(d: Path, depth: int) -> None:
         try:
             for entry in d.iterdir():
                 if entry.is_file():
-                    if not _is_game_binary(entry):
-                        continue
-                    stem = entry.stem.lower()
-                    if stem in _NON_GAME_EXES or stem in _NON_GAME_SCRIPTS:
-                        continue
-                    if stem.startswith("setup_"):
-                        continue  # GOG setup — handled separately
-                    try:
-                        size = entry.stat().st_size
-                    except OSError:
-                        size = 0
-                    if size < 1_000_000:  # < 1MB → probably not the game
-                        continue
-                    cleaned = _clean_exe_name(entry.name)
-                    if cleaned:
-                        exes.append((cleaned, size))
+                    if _is_game_binary_file(entry):
+                        out.append(entry)
                 elif entry.is_dir() and depth < max_depth:
-                    if not entry.name.startswith(".") and entry.name.lower() not in _SKIP_SUBDIRS:
-                        _scan_dir(entry, depth + 1)
+                    name_lower = entry.name.lower()
+                    if not entry.name.startswith(".") and name_lower not in _SKIP_SUBDIRS:
+                        _scan(entry, depth + 1)
         except (PermissionError, OSError) as e:
             log.debug("Cannot scan %s for executables: %s", d, e)
 
-    _scan_dir(folder, 0)
-    exes.sort(key=lambda x: x[1], reverse=True)
-    return exes
+    _scan(folder, 0)
+    return out
+
+
+def _collect_exe_paths(folder: Path) -> list[Path]:
+    """Executables in the folder; one level deeper when the top level is empty.
+
+    Multi-disc and repack layouts hide the game binary/installer in a
+    subfolder (``disc1/``, ``Game/Binaries/``); a second level is searched
+    only when the first yields nothing, keeping large libraries fast.
+    """
+    paths = _exe_files_at_depth(folder, 1)
+    if not paths:
+        paths = _exe_files_at_depth(folder, 2)
+    return paths
+
+
+def _read_pe_metadata(path: Path) -> dict[str, str]:
+    """Read ProductName/FileDescription from a Windows PE VERSIONINFO resource.
+
+    Works for game exes AND bare installers whose filename carries no title.
+    Returns ``{}`` on non-Windows platforms or when no version resource
+    exists (never raises).
+    """
+    if sys.platform != "win32":
+        return {}
+    try:
+        import ctypes
+
+        version = ctypes.windll.version
+        size = version.GetFileVersionInfoSizeW(str(path), None)
+        if not size:
+            return {}
+        data = ctypes.create_string_buffer(size)
+        if not version.GetFileVersionInfoW(str(path), 0, size, data):
+            return {}
+        lp = ctypes.c_void_p()
+        ln = ctypes.c_uint()
+        if not version.VerQueryValueW(
+            data, "\\VarFileInfo\\Translation", ctypes.byref(lp), ctypes.byref(ln)
+        ) or ln.value < 4:
+            return {}
+        lang, codepage = struct.unpack_from("<HH", ctypes.string_at(lp, 4))
+        out: dict[str, str] = {}
+        for field, key_name in (
+            ("ProductName", "product_name"),
+            ("FileDescription", "file_description"),
+        ):
+            key = f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\{field}"
+            lp2 = ctypes.c_void_p()
+            ln2 = ctypes.c_uint()
+            if version.VerQueryValueW(
+                data, key, ctypes.byref(lp2), ctypes.byref(ln2)
+            ) and ln2.value:
+                out[key_name] = ctypes.wstring_at(lp2).strip()
+        return out
+    except (OSError, AttributeError, ValueError) as e:
+        log.debug("PE metadata read failed for %s: %s", path, e)
+        return {}
 
 
 def _find_gog_setup_exe(folder: Path) -> str | None:
@@ -657,44 +719,219 @@ def _load_steam_manifests(steamapps_dir: Path) -> dict[str, str]:
     return result
 
 
+def _looks_like_installer(filename: str) -> bool:
+    """True if an executable filename carries an installer marker token.
+
+    Matches separated tokens (``Hollow Knight-Setup.exe``,
+    ``doom_eternal_installer.exe``) and CamelCase-attached suffixes
+    (``DoomEternalSetup.exe``). Bare ``setup.exe``/``installer.exe`` carry no
+    title and are excluded (the folder name is the better source).
+    """
+    stem = re.sub(r"\.(exe|sh|bin|appimage)$", "", filename, flags=re.IGNORECASE)
+    low = stem.lower()
+    if low in _NON_GAME_EXES or low in _NON_GAME_SCRIPTS:
+        return False
+    if low.startswith("setup_"):
+        return False  # GOG installers — parsed by _find_gog_setup_exe
+    if re.search(r"(?i)(?:^|[-_.\s])(?:setup|install(?:er|shield)?|repack|unpacked)(?:$|[-_.\s])", low):
+        return True
+    return bool(re.search(r"(?i)(?:setup|install(?:er|shield)?|repack|unpacked)$", low))
+
+
+def _clean_installer_name(filename: str) -> str:
+    """Extract the game title embedded in an installer filename.
+
+    ``Hollow Knight-Setup.exe`` → ``Hollow Knight``
+    ``doom_eternal_installer.exe`` → ``Doom Eternal``
+    ``hollow_knight_dodi_setup.exe`` → ``Hollow Knight``
+    ``DoomEternalSetup.exe`` → ``Doom Eternal``
+    Repack-group names, installer markers, dotted versions and ``(id)`` tags
+    are stripped. Returns ``""`` when no title remains.
+    """
+    stem = re.sub(r"\.(exe|sh|bin|appimage)$", "", filename, flags=re.IGNORECASE)
+    if stem.lower().startswith("setup_"):
+        return ""
+    stem = re.sub(r"(?i)(?:[-_.\s]*(?:setup|install(?:er|shield)?|repack|unpacked)+)+$", "", stem)
+    kept = []
+    for t in re.split(r"[-_.\s]+", stem):
+        if not t:
+            continue
+        low = t.lower()
+        if low in _REPACK_GROUPS or low in _INSTALL_TOKENS:
+            continue
+        if re.match(r"^v?\d+(?:\.\d+)+$", low):
+            continue
+        if re.match(r"^\(\d+\)$", t):
+            continue
+        kept.append(t)
+    if not kept:
+        return ""
+    return capwords(_clean_exe_name(" ".join(kept)).replace("-", " "))
+
+
+def _title_quality(name: str) -> float:
+    """Score how title-like a candidate name is (0.0 – 1.0).
+
+    Penalizes junk tokens (repack groups, installer markers, engines),
+    dotted version numbers, and digit-heavy strings; rewards 2–5 word
+    titles. All-junk candidates (e.g. "Setup Program") score 0.
+    """
+    n = (name or "").strip()
+    if not _looks_like_game_name(n) or len(n) > 60:
+        return 0.0
+    tokens = [t for t in re.split(r"[\s:;,.\-—–]+", n) if t]
+    if not tokens:
+        return 0.0
+    lows = [t.lower() for t in tokens]
+    if all(t in _JUNK_TOKENS for t in lows):
+        return 0.0
+    w = len(tokens)
+    if w == 1:
+        score = 0.55
+    elif w <= 5:
+        score = 1.0
+    elif w <= 8:
+        score = 0.8
+    else:
+        score = 0.5
+    score *= 0.6 ** sum(1 for t in lows if t in _JUNK_TOKENS)
+    if re.search(r"\d+\.\d+", n):
+        score *= 0.6
+    if sum(c.isdigit() for c in n) / max(len(n), 1) > 0.4:
+        score *= 0.5
+    return min(score, 1.0)
+
+
+def _norm_key(name: str) -> str:
+    """Normalize a candidate name so independent sources can be compared."""
+    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+def _installer_candidates(folder: Path) -> list[str]:
+    """Game titles extracted from installer executable filenames."""
+    names: list[str] = []
+    for p in _collect_exe_paths(folder):
+        if not _looks_like_installer(p.name):
+            continue
+        name = _clean_installer_name(p.name)
+        if name and _looks_like_game_name(name):
+            names.append(name)
+    return names
+
+
+def _best_name_from_evidence(folder_path: Path, cleaned_folder_name: str) -> str:
+    """Pick the best game name by scoring evidence from every folder signal.
+
+    Candidates (with source weights): installer filenames 0.90, PE
+    ProductName 0.75, PE FileDescription 0.70, cleaned folder name 0.60,
+    plain exe stems 0.55, parent folder name 0.40 (only when the folder name
+    itself is junk). Final score = weight x title-quality, +0.10 when two
+    different sources agree on the same normalized name. Ties prefer the
+    shorter name (the main game, not DLC). Below-threshold results fall back
+    to the cleaned folder name.
+    """
+    candidates: list[tuple[str, float, str]] = []
+
+    def add(name: str, weight: float, source: str) -> None:
+        name = (name or "").strip()
+        if name and _looks_like_game_name(name):
+            candidates.append((name, weight, source))
+
+    for name in _installer_candidates(folder_path):
+        add(name, 0.90, "installer")
+
+    sized: list[tuple[Path, int]] = []
+    for p in _collect_exe_paths(folder_path):
+        stem = p.stem.lower()
+        if stem in _NON_GAME_EXES or stem in _NON_GAME_SCRIPTS or stem.startswith("setup_"):
+            continue
+        try:
+            size = p.stat().st_size
+        except OSError:
+            size = 0
+        if size >= 1_000_000:
+            sized.append((p, size))
+    sized.sort(key=lambda t: t[1], reverse=True)
+    for p, _size in sized[:3]:
+        meta = _read_pe_metadata(p)
+        if meta.get("product_name"):
+            add(meta["product_name"], 0.75, "pe_product")
+        if meta.get("file_description"):
+            add(meta["file_description"], 0.70, "pe_desc")
+
+    if _title_quality(cleaned_folder_name) > 0:
+        add(cleaned_folder_name, 0.60, "folder")
+    else:
+        parent = folder_path.parent
+        if not _is_container(parent.name):
+            add(clean_folder_name(parent.name), 0.40, "parent")
+
+    for p, size in sized:
+        cleaned = _clean_exe_name(p.name)
+        if cleaned:
+            add(cleaned, 0.55, "stem")
+
+    if not candidates:
+        return cleaned_folder_name
+
+    sources_by_key: dict[str, set[str]] = {}
+    for name, _weight, source in candidates:
+        sources_by_key.setdefault(_norm_key(name), set()).add(source)
+
+    best: tuple[tuple[float, int], str] | None = None
+    for name, weight, _source in candidates:
+        q = _title_quality(name)
+        if q <= 0:
+            continue
+        score = weight * q
+        if len(sources_by_key[_norm_key(name)]) > 1:
+            score += 0.10
+        key = (-score, len(name))
+        if best is None or key < best[0]:
+            best = (key, name)
+    if best is None:
+        return cleaned_folder_name
+    if -best[0][0] < 0.20:
+        return cleaned_folder_name
+    return best[1]
+
+
 def smart_detect_game_name(folder_path: Path, cleaned_folder_name: str) -> str:
     """Smart-detect the game name from multiple sources.
 
-    Tries each source in order of reliability and returns the first good result:
+    Authoritative metadata wins outright, in order of reliability:
 
-    1. **Steam manifest** (``appmanifest_*.acf``) — authoritative, matches by
-       ``installdir`` so no false positives.
-    2. **GOG metadata** (``goggame-*.info`` JSON) — authoritative.
-    3. **GOG setup executable** — extracts game name from the setup filename
-       (``setup_achilles_legends_untold_1.4.0.0_(74603).exe`` → ``Achilles Legends Untold``).
-    4. **Cleaned folder name** — used when it looks like a real game name.
-    5. **Largest non-launcher .exe** — scans files (and one level of subfolders)
-       for the game binary; extracts and cleans its name.
-    6. **Cleaned folder name** (final fallback, even if it looks poor).
+    1. **Steam manifest** (``appmanifest_*.acf``) — matched by ``installdir``.
+    2. **GOG metadata** (``goggame-*.info`` JSON).
+    3. **GOG setup executable** (``setup_achilles_legends_untold_..._.exe``).
+
+    Otherwise every remaining signal is collected as evidence and scored:
+
+    * installer filenames (``Hollow Knight-Setup.exe``, ``DoomEternalSetup.exe``,
+      repack installers) — the title is deliberately embedded;
+    * PE VERSIONINFO ``ProductName`` / ``FileDescription`` of the largest
+      executables (Windows) — rescues bare ``setup.exe`` repacks and generic
+      binaries (``game.exe``, ``main.exe``);
+    * cleaned folder name, plain exe stems (CamelCase cleaned, ≥1MB), and the
+      parent folder name (only when the folder name itself is junk);
+      executables are searched one subfolder level deeper when the top level
+      yields nothing (multi-disc layouts).
+
+    The top-scoring candidate wins (weight x title-quality, +agreement bonus
+    when independent sources concur); below-threshold results fall back to
+    the cleaned folder name.
     """
-    # 1. Steam manifest
     name = _read_steam_manifest(folder_path)
     if name and _looks_like_game_name(name):
         return name
 
-    # 2. GOG metadata
     name = _read_gog_metadata(folder_path)
     if name and _looks_like_game_name(name):
         return name
 
-    # 3. GOG setup executable
     name = _find_gog_setup_exe(folder_path)
     if name and _looks_like_game_name(name):
         return name
 
-    # 4. If folder name looks good, use it
-    if _looks_like_game_name(cleaned_folder_name):
-        return cleaned_folder_name
+    return _best_name_from_evidence(folder_path, cleaned_folder_name)
 
-    # 5. Try .exe files (only when folder name looks bad)
-    exes = _find_game_exes(folder_path)
-    if exes:
-        return exes[0][0]
-
-    # 6. Final fallback
-    return cleaned_folder_name
