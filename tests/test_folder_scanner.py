@@ -390,3 +390,144 @@ class TestScanGames:
         assert "aphelion" in results[0].cleaned_name.lower()
         assert "gog" not in results[0].cleaned_name.lower()
         assert "90803" not in results[0].cleaned_name
+
+
+class TestInstallerNameDetection:
+    """Generic installer filenames carry the game name; parse any shape."""
+
+    def test_hyphen_setup_installer(self, tmp_path):
+        folder = tmp_path / "367520"
+        folder.mkdir()
+        (folder / "Hollow Knight-Setup.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_underscore_installer(self, tmp_path):
+        folder = tmp_path / "123"
+        folder.mkdir()
+        (folder / "doom_eternal_installer.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Doom Eternal"
+
+    def test_concat_camelcase_installer(self, tmp_path):
+        folder = tmp_path / "123"
+        folder.mkdir()
+        (folder / "DoomEternalSetup.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Doom Eternal"
+
+    def test_repack_group_tokens_stripped(self, tmp_path):
+        folder = tmp_path / "123"
+        folder.mkdir()
+        (folder / "hollow_knight_dodi_setup.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_bare_setup_exe_falls_back_to_folder(self, tmp_path):
+        """A bare setup.exe carries no name; the folder name wins."""
+        folder = tmp_path / "Hollow Knight"
+        folder.mkdir()
+        (folder / "setup.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_installer_wins_over_good_folder_name(self, tmp_path):
+        folder = tmp_path / "Cool Game"
+        folder.mkdir()
+        (folder / "Hollow Knight-Setup.exe").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_installer_in_linux_sh_form(self, tmp_path):
+        import sys
+
+        import pytest
+
+        if sys.platform == "win32":
+            pytest.skip(".sh installers are only scanned on Linux")
+        folder = tmp_path / "123"
+        folder.mkdir()
+        (folder / "hollow-knight-setup.sh").write_text("x")
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+
+class TestPeMetadataDetection:
+    """PE VERSIONINFO (ProductName/FileDescription) fills gaps filenames can't."""
+
+    def test_product_name_rescues_generic_exe(self, tmp_path, monkeypatch):
+        folder = tmp_path / "367520"
+        folder.mkdir()
+        (folder / "game.exe").write_bytes(b"\0" * 2_000_000)
+        monkeypatch.setattr(
+            "playcache.folder_scanner._read_pe_metadata",
+            lambda path: {"product_name": "Hollow Knight"},
+            raising=False,
+        )
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_file_description_rescues_generic_exe(self, tmp_path, monkeypatch):
+        folder = tmp_path / "367520"
+        folder.mkdir()
+        (folder / "main.exe").write_bytes(b"\0" * 2_000_000)
+        monkeypatch.setattr(
+            "playcache.folder_scanner._read_pe_metadata",
+            lambda path: {"file_description": "Doom Eternal"},
+            raising=False,
+        )
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Doom Eternal"
+
+    def test_pe_metadata_beats_exe_stem(self, tmp_path, monkeypatch):
+        folder = tmp_path / "367520"
+        folder.mkdir()
+        (folder / "hollow_knight.exe").write_bytes(b"\0" * 3_000_000)
+        monkeypatch.setattr(
+            "playcache.folder_scanner._read_pe_metadata",
+            lambda path: {"product_name": "Hollow Knight: Voidheart Edition"},
+            raising=False,
+        )
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight: Voidheart Edition"
+
+    def test_pe_junk_rejected_folder_wins(self, tmp_path, monkeypatch):
+        """PE metadata that is pure junk ('Setup Program') must not win."""
+        folder = tmp_path / "Hollow Knight"
+        folder.mkdir()
+        (folder / "setup.exe").write_bytes(b"\0" * 2_000_000)
+        monkeypatch.setattr(
+            "playcache.folder_scanner._read_pe_metadata",
+            lambda path: {"file_description": "Setup Program",
+                          "product_name": "Installer"},
+            raising=False,
+        )
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_no_pe_metadata_exes_still_detected(self, tmp_path):
+        """Without PE metadata (Linux CI / metadata-less exes) stems still work."""
+        folder = tmp_path / "367520"
+        folder.mkdir()
+        (folder / "HollowKnight.exe").write_bytes(b"\0" * 2_000_000)
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+
+class TestEvidenceSearchDepth:
+    def test_exe_found_two_levels_deep(self, tmp_path):
+        folder = tmp_path / "123456"
+        folder.mkdir()
+        inner = folder / "Game" / "Binaries"
+        inner.mkdir(parents=True)
+        (inner / "HollowKnight.exe").write_bytes(b"\0" * 2_000_000)
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+
+    def test_generic_folder_name_uses_parent(self, tmp_path):
+        parent = tmp_path / "Hollow Knight"
+        folder = parent / "game"
+        folder.mkdir(parents=True)
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"
+

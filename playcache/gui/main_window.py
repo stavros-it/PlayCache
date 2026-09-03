@@ -438,6 +438,18 @@ class MainWindow(QMainWindow):
     def _open_scan_dialog(self) -> None:
         dialog = ScanDialog(self._cataloger, self._config, parent=self)
         dialog.exec()
+        # Purge exact-name duplicates the scan may have introduced
+        # (same game found twice; the most complete copy is kept).
+        try:
+            purged = self._db.purge_exact_duplicates()
+        except Exception as e:  # noqa: BLE001 - purge must never block refresh
+            log.warning("Duplicate purge failed: %s", e)
+            purged = 0
+        if purged:
+            log.info("Purged %d exact duplicate game(s) after scan", purged)
+            self.statusBar().showMessage(
+                f"Purged {purged} duplicate game(s).", 5000
+            )
         # Refresh whatever happened (even dry-runs may have scanned folders)
         self._refresh_table()
         self._update_status_bar()

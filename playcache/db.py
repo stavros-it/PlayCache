@@ -72,6 +72,21 @@ EDITABLE_COLUMNS = {
 }
 
 
+def _completeness_key(row: dict) -> tuple:
+    """Sort key for duplicate-keeper choice: most complete row first."""
+    text_fields = (
+        "game_name", "platform", "store", "user_rating", "game_type",
+        "short_description", "release_date", "developer", "publisher",
+        "cover_url", "website", "esrb_rating", "data_source",
+    )
+    filled = sum(1 for f in text_fields if (row.get(f) or "").strip())
+    filled += 1 if row.get("manual_overrides") else 0
+    filled += 1 if row.get("metacritic_score") is not None else 0
+    filled += 1 if row.get("rawg_id") is not None else 0
+    filled += 1 if row.get("thegamesdb_id") is not None else 0
+    return (row.get("fetch_status") == "ok", filled, row.get("updated_at") or "")
+
+
 class Database:
     def __init__(self, db_path: str):
         self.db_path = str(db_path)
@@ -168,6 +183,44 @@ class Database:
             conn.executemany(sql, values_batch)
         return len(records)
 
+
+    def purge_exact_duplicates(self) -> int:
+        """Delete rows sharing an exact (case-insensitive) game name.
+
+        Keeps the most complete copy per name (fetch_status ok first, then
+        most populated fields incl. manual overrides, then newest updated_at)
+        and never removes every copy of a game. Rows with an empty game_name
+        are never grouped. Runs in one transaction; returns rows removed.
+        """
+        fields = (
+            "folder_path", "game_name", "platform", "store", "user_rating",
+            "game_type", "short_description", "release_date", "developer",
+            "publisher", "metacritic_score", "cover_url", "website",
+            "esrb_rating", "data_source", "rawg_id", "thegamesdb_id",
+            "manual_overrides", "fetch_status", "updated_at",
+        )
+        with self.connect() as conn:
+            rows = [dict(r) for r in conn.execute(
+                f"SELECT {', '.join(fields)} FROM games;"
+            ).fetchall()]
+            groups: dict[str, list[dict]] = {}
+            for row in rows:
+                name = (row["game_name"] or "").strip().lower()
+                if name:
+                    groups.setdefault(name, []).append(row)
+            to_delete: list[str] = []
+            for members in groups.values():
+                if len(members) < 2:
+                    continue
+                members.sort(key=_completeness_key, reverse=True)
+                to_delete.extend(m["folder_path"] for m in members[1:])
+            if not to_delete:
+                return 0
+            conn.executemany(
+                "DELETE FROM games WHERE folder_path = ?;",
+                [(p,) for p in to_delete],
+            )
+            return len(to_delete)
 
     def get_by_path(self, folder_path: str) -> GameRecord | None:
         with self.connect() as conn:
