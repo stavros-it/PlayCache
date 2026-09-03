@@ -6,7 +6,7 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.0.0)
+## Current state (v1.4.0)
 
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
 - ✅ Folder scanning with library-root descent, smart name detection, store detection
