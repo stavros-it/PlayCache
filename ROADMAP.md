@@ -66,6 +66,13 @@
   folders and ELF/AppImage/.sh executables; volume labels resolved via
   `/proc/mounts`; `.desktop` file generation on Linux
 - ✅ 164 tests passing, ruff clean
+- ✅ Close-after-scan fix (2026-09-03) — the scan dialog's Close button and
+  the main window's close (X) stopped working after a finished scan/refetch
+  because `finished -> deleteLater` destroyed the worker's C++ object while
+  Python references lingered (`RuntimeError: Internal C++ object already
+  deleted` before `reject()` / `event.accept()` ran). References are now
+  cleared on thread finish and all `isRunning()` guards tolerate dead wrappers
+  (`qtutils.worker_is_running`). 168 tests passing, ruff clean.
 
 ## Priorities
 
@@ -242,6 +249,39 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-03 — Fix: windows stopped closing after a finished scan
+
+**Symptom**: after scanning a folder, pressing Close did nothing — neither the
+scan dialog nor (once a refetch had run) the main window would close.
+`playcache.log` showed repeated
+`RuntimeError: libshiboken: Internal C++ object (ScanWorker/RefetchWorker)
+already deleted` at `scan_dialog.py:_on_close` and `main_window.py:closeEvent`.
+
+**Root cause**: the audit's cleanup pattern `worker.finished.connect(
+worker.deleteLater)` destroys the QThread's C++ object when the event loop
+resumes after `run()` returns, but `self._worker` / `self._refetch_worker`
+kept pointing at the dead Python wrapper. The next access — the Close
+button's `isRunning()` check, or `closeEvent` — raised RuntimeError, aborting
+the slot before `reject()` / `event.accept()` could run, so the close was
+silently swallowed.
+
+**Fix**:
+- `ScanDialog._on_worker_thread_finished` /
+  `MainWindow._on_refetch_thread_finished`: connected to `finished`, they call
+  `deleteLater()` on the sender and clear the instance reference (root cause:
+  no dangling wrapper).
+- New `playcache/gui/qtutils.py::worker_is_running()` returns False instead of
+  raising when the wrapper is dead (defense in depth); used by the dialog's
+  Close handler, the re-fetch/settings busy-guards, and `closeEvent`.
+- Regression tests in `tests/test_close_after_scan.py` (4) reproduce the exact
+  RuntimeError against headless Qt before the fix and assert
+  `reject()` / `event.accept()` now run.
+
+**Trade-offs**: `self.sender()` inside the cleanup handlers relies on Qt's
+signal introspection (safe within a directly-connected slot). The guarded
+`isRunning()` could mask a genuinely-deleted worker's state, but "not running"
+is the correct semantic for a destroyed thread.
 
 ### 2026-08-18 — Switch primary API from TheGamesDB to RAWG
 

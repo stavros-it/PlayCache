@@ -73,7 +73,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 164 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 168 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -119,6 +119,7 @@ Game DB/
 │   └── gui/                   # PySide6 GUI package
 │       ├── __init__.py        # exports MainWindow
 │       ├── theme.py           # centralized dark palette + DARK_QSS + contrast_text()
+│       ├── qtutils.py         # Qt helpers (worker_is_running guards dead QThread refs)
 │       ├── item_delegate.py    # GamesItemDelegate — status badges + source accents
 │       ├── table_model.py     # QAbstractTableModel (fieldEdited signal)
 │       ├── scan_dialog.py     # scan config + ScanWorker QThread + conflict prompt
@@ -135,11 +136,12 @@ Game DB/
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_manual_overrides.py      # 10 tests + schema migration
     ├── test_item_delegate.py         # 13 tests — paint regression for PySide6 6.x enums
+    ├── test_close_after_scan.py      # 4 tests — Close works after a finished scan (dead QThread refs)
     ├── test_backup.py                # 18 tests (atomic write, replace_all atomicity)
     └── test_exporter.py             # 8 tests (formula injection sanitization)
 ```
 
-**Total**: ~5,196 LOC source + ~1,500 LOC tests = ~6,696 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,460 LOC source + ~1,680 LOC tests = ~7,140 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -317,7 +319,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 164 passing).
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 168 passing).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)
@@ -424,6 +426,18 @@ git push --tags
   - **`run.py`** now configures logging (was dropping all diagnostics).
   - **`run.pyw`** removes redundant import and falls back to stderr when Qt is
     unavailable.
+- **Deleted-QThread references (2026-09-03)** — workers wired as
+  `finished -> deleteLater` have their C++ object destroyed shortly after the
+  scan/refetch finishes, but the Python attribute (`ScanDialog._worker`,
+  `MainWindow._refetch_worker`) kept referencing the dead wrapper. Any later
+  access (dialog Close button, `_refetch_selected`, `_open_settings`,
+  `closeEvent`) raised `RuntimeError: Internal C++ object already deleted`,
+  which aborted the slot before `reject()` / `event.accept()` — so windows
+  stopped closing after a scan. Fix: workers are now connected to a cleanup
+  handler that clears the reference before `deleteLater()`, and every
+  `isRunning()` guard uses `playcache/gui/qtutils.py::worker_is_running()`,
+  which tolerates destroyed wrappers. Never call `isRunning()` on a worker
+  reference directly — always go through `worker_is_running()`.
 - **Dark theme is not user-toggleable** — the app is dark-only. A light theme
   would require a parallel palette in `theme.py` and a settings toggle; not
   planned for v1.x.

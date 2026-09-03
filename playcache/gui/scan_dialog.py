@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from ..cataloger import Cataloger
 from ..config import Config
+from .qtutils import worker_is_running
 
 log = logging.getLogger(__name__)
 
@@ -221,8 +222,14 @@ class ScanDialog(QDialog):
         self._worker.result.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
         self._worker.conflict.connect(self._on_conflict)
-        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
+
+    def _on_worker_thread_finished(self) -> None:
+        worker = self.sender()
+        worker.deleteLater()
+        if self._worker is worker:
+            self._worker = None
 
     def _on_progress(self, idx: int, total: int, message: str) -> None:
         pct = int(idx * 100 / total) if total else 0
@@ -292,7 +299,7 @@ class ScanDialog(QDialog):
         QMessageBox.critical(self, "Scan failed", message)
 
     def _on_close(self) -> None:
-        if self._worker and self._worker.isRunning():
+        if worker_is_running(self._worker):
             reply = QMessageBox.question(
                 self, "Cancel scan?",
                 "A scan is in progress. Cancel and close?",
