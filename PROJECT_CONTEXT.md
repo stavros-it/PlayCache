@@ -101,7 +101,7 @@ Game DB/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.4.0"
+│   ├── __init__.py             # version = "1.5.0"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
