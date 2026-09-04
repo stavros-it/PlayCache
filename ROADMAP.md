@@ -85,6 +85,13 @@
   (case-insensitive) duplicates are removed automatically, keeping the most
   complete copy (ok status → most fields → newest). Fuzzy duplicates stay
   manual via Find Duplicates… 191 tests passing, ruff clean.
+- ✅ Game archive scanning (2026-09-04) — `.zip`/`.7z`/`.rar`/`.iso` files
+  found during a scan are catalogued as games in their own right, with the
+  title parsed from the archive filename (versions, `(id)` tags, repack
+  groups, download-site URL prefixes and multi-part RAR numbering stripped).
+  Folders that hold only archives yield the archives instead of a junk
+  folder row; folders with game executables stay normal game folders.
+  209 tests passing, ruff clean.
 
 ## Priorities
 
@@ -261,6 +268,48 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-04 — Game archives (.zip/.7z/.rar/.iso) as game entries
+
+**Trigger**: user asked the folder-scan parser to identify a game from the
+filename of an archive. Two interpretations were considered — archives as
+name evidence inside game folders vs. archives as game entries in their own
+right — and the user chose **archive = game entry** with extension set
+zip/7z/rar/iso.
+
+**Changes** (`folder_scanner.py`):
+- `_archive_entries(folder)` lists a folder's files and yields a
+  `ScannedFolder` per game archive; `folder_path` is the archive file path
+  (works as the DB upsert key; "Open folder" opens the parent directory).
+- `_clean_archive_name()` parses the title: extension stripped, URL-ish
+  prefixes (`fitgirl-repacks.site-…`) removed, then the existing
+  `clean_folder_name` pipeline handles versions, `(id)` tags and repack
+  groups. `setup_*.zip`-style archives delegate to the GOG setup parser
+  (`_GOG_SETUP_RE` extended with archive extensions). CamelCase stems are
+  split (`DoomEternal.zip` → `Doom Eternal`). Junk stems (readme, data,
+  saves, …) are rejected via `_ARCHIVE_JUNK_NAMES`.
+- Traversal rules: archives are collected at the scan root, inside library
+  containers, and replace a folder that contains archives but **no game
+  executables** (an archive holder such as `Backups/` no longer becomes a
+  junk "Backups" row). A folder with archives **and** game exes stays a
+  normal game folder — its archives are ignored (repack-folder layout).
+- Multi-part RAR: only `Game.part1.rar` yields an entry; `.part2+` and
+  `.r00`-style volumes are skipped. Split `.zip.001` volumes are naturally
+  excluded (unknown extension).
+
+**Tests** (19 added, 191 → 209): name parsing (versions/ids/URL prefixes/
+CamelCase/GOG setup/part tokens/junk/hyphen preservation) and scan behavior
+(loose archives, each extension, multi-part dedupe, holder folders with and
+without exes, container store detection, recursive grouping, data-zip
+folders).
+
+**Trade-offs**: name parsing is filename-only (nothing is extracted), so a
+misnamed archive yields a wrong-but-plausible row — covered by manual
+overrides. A game folder that legitimately contains only a data zip and no
+executable now yields nothing (rare layout; the zip's stem is usually in the
+junk list, which falls back to the folder row). An installed game and its
+archived copy both appear until the post-scan exact-name purge keeps the
+most complete copy.
 
 ### 2026-09-03 — Evidence-based game-name detection + post-scan duplicate purge
 

@@ -73,7 +73,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 191 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 209 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -105,7 +105,8 @@ Game DB/
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
-│   ├── folder_scanner.py      # smart game-name detection from folders/files/metadata
+│   ├── folder_scanner.py      # smart game-name detection from folders/files/metadata;
+│   │                          # game archives (.zip/.7z/.rar/.iso) as game entries
 │   ├── textutils.py           # HTML strip, truncate, ratings, fuzzy match
 │   ├── rawg_client.py         # RAWG API client — primary source
 │   ├── thegamesdb_client.py   # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
@@ -131,7 +132,7 @@ Game DB/
 │       └── main_window.py     # toolbar, filters, table, proxy, status bar
 └── tests/                     # pytest suite
     ├── test_textutils.py             # 34 tests (NaN/Inf ratings, em-dash, truncate)
-    ├── test_folder_scanner.py        # 71 tests (smart detection + installer/PE evidence)
+    ├── test_folder_scanner.py        # 90 tests (smart detection + installer/PE evidence + archives)
     ├── test_db.py                    # 18 tests (upsert_many + UNC paths + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_manual_overrides.py      # 10 tests + schema migration
@@ -142,7 +143,7 @@ Game DB/
     └── test_exporter.py             # 8 tests (formula injection sanitization)
 ```
 
-**Total**: ~5,720 LOC source + ~1,920 LOC tests = ~7,640 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,810 LOC source + ~2,010 LOC tests = ~7,820 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -210,6 +211,15 @@ Game DB/
       are searched one subfolder level deeper when the top level is empty
       (multi-disc layouts). Weights: installer 0.90, PE product 0.75,
       PE description 0.70, folder 0.60, stem 0.55, parent 0.40.
+   5. **Game archives** (`.zip`/`.7z`/`.rar`/`.iso`) are catalogued as games
+      in their own right: the title is parsed from the archive filename
+      (`Hollow.Knight.v1.0.231.32-bit.(48932).zip` → `Hollow Knight`), with
+      URL prefixes (`fitgirl-repacks.site-…`), repack-group tokens, dotted
+      versions and `(id)` tags stripped. Multi-part RARs yield only
+      `part1`. A folder that contains archives but **no game executables**
+      is an archive holder (e.g. `Backups/`) — its archives are yielded and
+      the folder itself is not; a folder with archives **and** game exes is
+      a normal game folder (its archives are ignored).
    Then detects store + platform. If a game is found that already exists in the
    DB on a **different disk**, a conflict handler prompts the user to choose
    which copy to keep (new / old / both).
@@ -336,7 +346,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 191 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 209 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
@@ -466,6 +476,16 @@ git push --tags
 - **Post-scan purge is exact-name only** — `purge_exact_duplicates()` groups
   by `lower(game_name)` and never touches fuzzy lookalikes ("Doom" vs
   "Doom Eternal" stay). Fuzzy duplicates remain manual (Find Duplicates…).
+- **Archive detection is filename-only** — `.zip`/`.7z`/`.rar`/`.iso` files
+  are catalogued as games from their filename alone (nothing is extracted or
+  opened). Junk stems (readme/data/saves/…) are filtered by
+  `_ARCHIVE_JUNK_NAMES` in `folder_scanner.py`; an archive whose parsed name
+  is empty is skipped silently. Archives inside a folder that also contains
+  game executables are ignored (the folder is the game); multi-part RAR
+  continuation volumes (`.part2+`, `.r00`) are skipped so only
+  `Game.part1.rar` yields an entry. An installed game and its archived copy
+  end up as two rows with the same name — the post-scan exact-name purge
+  keeps the most complete copy.
 - **Installer name cleaning strips hyphens** — installer filenames are
   treated as search queries: `half-life-setup.exe` → `Half Life` (hyphen
   dropped). The API fuzzy match tolerates this; don't reuse

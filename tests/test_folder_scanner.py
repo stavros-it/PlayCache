@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from playcache.folder_scanner import (
+    _clean_archive_name,
     _clean_exe_name,
     _clean_gog_setup_name,
     _looks_like_game_name,
@@ -533,4 +534,115 @@ class TestEvidenceSearchDepth:
         folder.mkdir(parents=True)
         result = smart_detect_game_name(folder, clean_folder_name(folder.name))
         assert result == "Hollow Knight"
+
+
+class TestCleanArchiveName:
+    def test_simple_zip(self):
+        assert _clean_archive_name("Hollow Knight.zip") == "Hollow Knight"
+
+    def test_extension_variants(self):
+        assert _clean_archive_name("Hollow Knight.7z") == "Hollow Knight"
+        assert _clean_archive_name("Hollow Knight.rar") == "Hollow Knight"
+        assert _clean_archive_name("Hollow Knight.iso") == "Hollow Knight"
+
+    def test_dotted_version_and_id(self):
+        out = _clean_archive_name("Hollow.Knight.v1.0.231.32-bit.(48932).zip")
+        assert out == "Hollow Knight"
+
+    def test_url_prefix(self):
+        assert _clean_archive_name("fitgirl-repacks.site-Hollow Knight.zip") == "Hollow Knight"
+
+    def test_camelcase(self):
+        assert _clean_archive_name("DoomEternal.zip") == "Doom Eternal"
+
+    def test_bracketed_repack(self):
+        assert _clean_archive_name("Doom Eternal [FitGirl Repack].7z") == "Doom Eternal"
+
+    def test_gog_setup_archive(self):
+        assert _clean_archive_name(
+            "setup_achilles_legends_untold_1.4.0.0_(74603).zip"
+        ) == "Achilles Legends Untold"
+
+    def test_part_token_stripped(self):
+        assert _clean_archive_name("Hollow Knight.part1.rar") == "Hollow Knight"
+
+    def test_junk_names_rejected(self):
+        assert _clean_archive_name("readme.zip") == ""
+        assert _clean_archive_name("data.zip") == ""
+
+    def test_preserves_hyphens(self):
+        assert _clean_archive_name("Half-Life.zip") == "Half-Life"
+
+
+class TestArchiveScanning:
+    def test_loose_archive_at_root(self, tmp_path):
+        (tmp_path / "Hollow Knight.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        r = results[0]
+        assert r.folder_name == "Hollow Knight.zip"
+        assert r.cleaned_name == "Hollow Knight"
+        assert r.folder_path.endswith(".zip")
+
+    def test_archive_extensions_detected(self, tmp_path):
+        for i, ext in enumerate((".7z", ".rar", ".iso")):
+            (tmp_path / f"Game {i}{ext}").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        names = sorted(r.folder_name for r in results)
+        assert names == ["Game 0.7z", "Game 1.rar", "Game 2.iso"]
+
+    def test_multipart_rar_only_first_part(self, tmp_path):
+        (tmp_path / "Hollow Knight.part1.rar").write_text("x")
+        (tmp_path / "Hollow Knight.part2.rar").write_text("x")
+        (tmp_path / "Hollow Knight.part3.rar").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "Hollow Knight.part1.rar"
+
+    def test_holder_folder_yields_archives_not_folder(self, tmp_path):
+        holder = tmp_path / "Backups"
+        holder.mkdir()
+        (holder / "Hollow Knight.zip").write_text("x")
+        (holder / "Doom Eternal.7z").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        names = sorted(r.folder_name for r in results)
+        assert names == ["Doom Eternal.7z", "Hollow Knight.zip"]
+
+    def test_holder_folder_with_exe_yields_folder(self, tmp_path):
+        holder = tmp_path / "Repacks"
+        holder.mkdir()
+        (holder / "Hollow Knight-Setup.exe").write_text("x")
+        (holder / "hollow_knight.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "Repacks"
+        assert results[0].cleaned_name == "Hollow Knight"
+
+    def test_archive_store_from_container(self, tmp_path):
+        gog = tmp_path / "GOG Games"
+        gog.mkdir()
+        (gog / "Biomutant.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].store == "GOG"
+        assert results[0].cleaned_name == "Biomutant"
+
+    def test_junk_archive_at_root_skipped(self, tmp_path):
+        (tmp_path / "readme.zip").write_text("x")
+        assert list(scan_games(str(tmp_path))) == []
+
+    def test_archive_in_grouping_folder(self, tmp_path):
+        fps = tmp_path / "FPS"
+        fps.mkdir()
+        (fps / "Hollow Knight.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert [r.folder_name for r in results] == ["Hollow Knight.zip"]
+
+    def test_game_folder_with_data_zip_keeps_folder(self, tmp_path):
+        folder = tmp_path / "Hollow Knight"
+        folder.mkdir()
+        (folder / "saves.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "Hollow Knight"
 

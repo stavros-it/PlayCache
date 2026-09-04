@@ -7,6 +7,8 @@ A "game folder" is a directory whose name carries the game title. The scanner:
   * strips release-group/version noise from folder names for better API matching
   * smart-detects game names from metadata files, GOG setup executables,
     and game .exe files when the folder name is noisy or unhelpful
+  * treats game archives (.zip/.7z/.rar/.iso) as games in their own right,
+    parsing the title out of the archive filename
   * guesses the store (Steam / GOG / Epic / ...) from the path
 """
 from __future__ import annotations
@@ -138,8 +140,9 @@ _CAMEL_SPLIT = re.compile(r"([a-z])([A-Z])")
 _ALLCAPS_SPLIT = re.compile(r"([A-Z]{2,})([A-Z][a-z])")
 
 # GOG setup installer pattern: setup_<gamename>_<version>_(<id>).{exe,sh,bin}
-# .exe = Windows installer, .sh = Linux installer, .bin = generic binary
-_GOG_SETUP_RE = re.compile(r"^setup_(.+)\.(?:exe|sh|bin)$", re.IGNORECASE)
+# .exe = Windows installer, .sh = Linux installer, .bin = generic binary.
+# Archive extensions are included so archived GOG installers parse too.
+_GOG_SETUP_RE = re.compile(r"^setup_(.+)\.(?:exe|sh|bin|zip|7z|rar|iso)$", re.IGNORECASE)
 
 # Tokens that are noise in GOG setup exe filenames
 _GOG_SETUP_NOISE = {
@@ -338,6 +341,7 @@ def scan_games(
         if _should_skip(child.name) or child.name.lower() in skip:
             continue
         yield from _resolve(child, skip, recursive=recursive, _visited=visited)
+    yield from _archive_entries(root_path)
 
 
 def _resolve(
@@ -365,6 +369,7 @@ def _resolve(
     store = detect_store(str(path))
 
     if _is_container(path.name):
+        yield from _archive_entries(path)
         for child in _list_dirs(path, _visited):
             if _should_skip(child.name) or child.name.lower() in skip:
                 continue
@@ -386,6 +391,11 @@ def _resolve(
                     continue
                 yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
             return
+
+    archives = _archive_entries(path)
+    if archives and not _collect_exe_paths(path):
+        yield from archives
+        return
 
     yield _make_scanned(path, store=store)
 
@@ -767,6 +777,104 @@ def _clean_installer_name(filename: str) -> str:
     if not kept:
         return ""
     return capwords(_clean_exe_name(" ".join(kept)).replace("-", " "))
+
+
+# =====================================================================
+# Game archives (.zip / .7z / .rar / .iso) as game entries
+# =====================================================================
+
+_ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar", ".iso"}
+
+# Multi-part RAR volumes: only ``Game.part1.rar`` is yielded; parts 2+ and
+# ``.r00``-style continuation volumes are skipped.
+_MULTIPART_RAR_RE = re.compile(r"^.+\.part(\d+)\.rar$", re.IGNORECASE)
+
+# Download-site URL prefixes embedded in archive names
+# (``fitgirl-repacks.site-Hollow Knight.zip``).
+_URL_PREFIX_RE = re.compile(
+    r"^(?:www\.)?[a-z0-9][a-z0-9.\-]*\.(?:com|net|org|site|io|xyz|me)\b[-_\s]*",
+    re.IGNORECASE,
+)
+
+_BITNESS_RE = re.compile(r"\b(?:32|64)[\- ]?bit\b", re.IGNORECASE)
+_PART_TOKEN_RE = re.compile(r"\bpart\d+\b", re.IGNORECASE)
+
+# Archive stems that are never game titles.
+_ARCHIVE_JUNK_NAMES = {
+    "readme", "manual", "notes", "docs", "data", "cache", "temp",
+    "backup", "backups", "download", "downloads", "archive", "archives",
+    "patch", "patches", "update", "updates", "crack", "cracks",
+    "trainer", "trainers", "cheats", "saves", "save", "savegame",
+    "savegames", "zips", "rars", "isos", "misc", "stuff", "unknown",
+    "game", "games",
+}
+
+
+def _is_archive(entry: Path) -> bool:
+    return entry.suffix.lower() in _ARCHIVE_EXTENSIONS
+
+
+def _is_multipart_continuation(entry: Path) -> bool:
+    m = _MULTIPART_RAR_RE.match(entry.name)
+    return bool(m and int(m.group(1)) > 1)
+
+
+def _clean_archive_name(filename: str) -> str:
+    """Extract a game title from an archive filename.
+
+    ``Hollow Knight.zip`` → ``Hollow Knight``
+    ``Hollow.Knight.v1.0.231.32-bit.(48932).zip`` → ``Hollow Knight``
+    ``fitgirl-repacks.site-Hollow Knight.zip`` → ``Hollow Knight``
+    ``setup_achilles_legends_untold_1.4.0.0_(74603).zip`` → ``Achilles Legends Untold``
+    ``Hollow Knight.part1.rar`` → ``Hollow Knight``
+
+    Returns ``""`` when the stem is junk (readme.zip, data.zip, ...).
+    """
+    stem = re.sub(r"\.(zip|7z|rar|iso)$", "", filename, flags=re.IGNORECASE)
+    if not stem:
+        return ""
+    if stem.lower().startswith("setup_"):
+        return _clean_gog_setup_name(filename)
+    if stem.lower() in _ARCHIVE_JUNK_NAMES:
+        return ""
+    stem = _PART_TOKEN_RE.sub(" ", stem)
+    stem = _URL_PREFIX_RE.sub(" ", stem)
+    stem = _BITNESS_RE.sub(" ", stem)
+    stem = _ALLCAPS_SPLIT.sub(r"\1 \2", stem)
+    stem = _CAMEL_SPLIT.sub(r"\1 \2", stem)
+    return clean_folder_name(stem)
+
+
+def _archive_entries(folder: Path) -> list[ScannedFolder]:
+    """ScannedFolder entries for game archives among the folder's files.
+
+    Archives whose parsed name is junk (``readme.zip``) or empty are skipped,
+    as are multi-part RAR continuation volumes. Store/platform come from the
+    archive's path.
+    """
+    entries: list[ScannedFolder] = []
+    try:
+        children = [c for c in folder.iterdir() if c.is_file() and not _is_hidden(c)]
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot list %s for archives: %s", folder, e)
+        return []
+    for c in sorted(children, key=lambda p: p.name.lower()):
+        if not _is_archive(c) or _is_multipart_continuation(c):
+            continue
+        name = _clean_archive_name(c.name)
+        if not name or not _looks_like_game_name(name) or _title_quality(name) <= 0:
+            continue
+        entries.append(
+            ScannedFolder(
+                folder_name=c.name,
+                folder_path=str(c.resolve()),
+                cleaned_name=name,
+                platform=detect_platform(str(c)),
+                store=detect_store(str(c)),
+                is_library_root=False,
+            )
+        )
+    return entries
 
 
 def _title_quality(name: str) -> float:
