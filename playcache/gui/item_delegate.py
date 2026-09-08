@@ -16,6 +16,8 @@ from .theme import (
     BG_CARD_ALT,
     BG_SELECTED,
     BG_WINDOW,
+    SOURCE_RAWG,
+    SOURCE_TGDB,
     STATUS_COLORS,
     TEXT_PRIMARY,
     contrast_text,
@@ -26,8 +28,8 @@ _SOURCE_COL = next(i for i, (h, _, _) in enumerate(COLUMNS) if h == "Source")
 
 
 _SOURCE_COLORS = {
-    "thegamesdb": "#818CF8",
-    "rawg": "#38BDF8",
+    "thegamesdb": SOURCE_TGDB,
+    "rawg": SOURCE_RAWG,
 }
 
 
@@ -88,7 +90,7 @@ class GamesItemDelegate(QStyledItemDelegate):
 
         # Draw the badge: a rounded rect inside the cell with padding
         badge_h = max(0, min(rect.height() - 8, 20))
-        badge_w = min(rect.width() - 12, 90)
+        badge_w = max(0, min(rect.width() - 12, 90))
         badge_x = rect.x() + (rect.width() - badge_w) // 2
         badge_y = rect.y() + (rect.height() - badge_h) // 2
         badge_rect = QRect(badge_x, badge_y, badge_w, badge_h)

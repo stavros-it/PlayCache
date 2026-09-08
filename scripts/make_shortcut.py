@@ -63,6 +63,14 @@ def _make_windows_shortcut() -> int:
     return 0
 
 
+def _escape_desktop_arg(value: str) -> str:
+    escaped = value.replace("\\", "\\\\")
+    escaped = escaped.replace('"', '\\"')
+    escaped = escaped.replace("`", "\\`")
+    escaped = escaped.replace("$", "\\$")
+    return escaped
+
+
 def _make_linux_desktop_entry() -> int:
     if not TARGET.is_file():
         print(f"Target not found: {TARGET}")
@@ -74,11 +82,14 @@ def _make_linux_desktop_entry() -> int:
         return 1
 
     python_exe = sys.executable or "python3"
+    exec_value = (
+        f'"{_escape_desktop_arg(python_exe)}" "{_escape_desktop_arg(str(TARGET))}"'
+    )
     desktop_entry = f"""[Desktop Entry]
 Type=Application
 Name=PlayCache
 Comment=Game library cataloguer
-Exec={python_exe} {TARGET}
+Exec={exec_value}
 Path={ROOT}
 Icon={icon}
 Terminal=false
@@ -99,7 +110,7 @@ StartupNotify=true
     else:
         print(f"Created: {desktop_path}")
 
-    print(f"  Target: {python_exe} {TARGET}")
+    print(f"  Target: {exec_value}")
     print(f"  Icon:   {icon}")
     return 0
 

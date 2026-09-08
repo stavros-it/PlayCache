@@ -56,6 +56,23 @@ STATUS_COLORS: dict[str, str] = {
     "(none)": STATUS_NONE,
 }
 
+# --- Data source accents (table Source column) ------------------------------
+SOURCE_TGDB = "#818CF8"     # indigo-400 — TheGamesDB rows in the Source column
+SOURCE_RAWG = "#38BDF8"     # sky-400 — RAWG rows in the Source column
+
+# --- Chart palette (stats dialog metric cards + distribution sections) -------
+CHART_SKY = "#38BDF8"       # sky-400 — cover art, stores
+CHART_VIOLET = "#A78BFA"    # violet-400 — release dates, platforms, manual edits
+CHART_AMBER = "#FBBF24"     # amber-400 — user ratings, release years
+CHART_RED = "#F87171"       # red-400 — ESRB ratings
+CHART_EMERALD = "#34D399"   # emerald-400 — metacritic, disks
+
+# --- Detail panel YouTube search button --------------------------------------
+YOUTUBE_BG = "#FF0000"            # red — default button face
+YOUTUBE_BG_HOVER = "#CC0000"      # darker red — hover state
+YOUTUBE_BG_DISABLED = "#555555"  # gray — disabled face
+YOUTUBE_TEXT_DISABLED = "#999999"  # light gray — disabled label
+
 
 # --- Smart text color (WCAG luminance) -------------------------------------
 def _luminance(color: QColor) -> float:
@@ -203,14 +220,14 @@ QTableCornerButton::section {{
 }}
 
 /* ---- Detail panel ---- */
-QTextEdit {{
+QTextEdit, QPlainTextEdit {{
     background-color: {BG_INPUT};
     color: {TEXT_PRIMARY};
     border: 1px solid {BORDER};
     border-radius: 4px;
     padding: 4px;
 }}
-QTextEdit:focus {{
+QTextEdit:focus, QPlainTextEdit:focus {{
     border-color: {ACCENT};
 }}
 

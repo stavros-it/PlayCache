@@ -6,6 +6,7 @@ from playcache.folder_scanner import (
     _clean_exe_name,
     _clean_gog_setup_name,
     _looks_like_game_name,
+    _normalize_root,
     clean_folder_name,
     detect_platform,
     detect_store,
@@ -774,3 +775,129 @@ class TestArchiveFolderResolution:
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
         assert results[0].cleaned_name == "Unreal"
+
+
+class TestNonObjectGogMetadata:
+    def test_non_object_gog_metadata_skipped(self, tmp_path):
+        import json
+
+        folder = tmp_path / "Hollow Knight"
+        folder.mkdir()
+        (folder / "goggame-1207658101.info").write_text(json.dumps(["corrupted", "entry"]))
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Hollow Knight"
+
+
+class TestRecursiveSkip:
+    def test_recursive_branch_honors_skip(self, tmp_path):
+        holder = tmp_path / "MyLib"
+        holder.mkdir()
+        (holder / "PrivateFolder").mkdir()
+        found = [r.folder_name for r in scan_games(str(tmp_path), recursive=True)]
+        assert found == ["PrivateFolder"]
+        skipped = list(scan_games(str(tmp_path), recursive=True, skip={"privatefolder"}))
+        assert skipped == []
+
+
+class TestGogSetupNumberTokens:
+    def test_title_numbers_preserved(self):
+        assert _clean_gog_setup_name(
+            "setup_duke_nukem_3d_2.0.0.9_(1207658101).exe"
+        ) == "Duke Nukem 3d"
+        assert _clean_gog_setup_name("setup_fifa_19_(1494).exe") == "Fifa 19"
+        assert _clean_gog_setup_name("setup_portal_2_2.1.0.9_(123).exe") == "Portal 2"
+
+    def test_versions_still_stripped(self):
+        assert _clean_gog_setup_name("setup_game_v2_(1).exe") == "Game"
+        assert _clean_gog_setup_name("setup_game_1.0d_(1).exe") == "Game"
+
+    def test_multivolume_id_token_stripped(self):
+        assert _clean_gog_setup_name(
+            "setup_titans_of_the_tide_1.0d_(88455)-1.bin"
+        ) == "Titans Of The Tide"
+
+    def test_no_stray_hyphen_tokens(self):
+        assert _clean_gog_setup_name(
+            "setup_the_witcher_-_enhanced_edition_1.5_(20900).exe"
+        ) == "The Witcher Enhanced Edition"
+
+
+class TestUnicodeNames:
+    def test_unicode_folder_name_preserved(self, tmp_path):
+        (tmp_path / "Παιχνίδια").mkdir()
+        results = list(scan_games(str(tmp_path)))
+        assert [r.cleaned_name for r in results] == ["Παιχνίδια"]
+
+    def test_unicode_archive_yielded(self, tmp_path):
+        (tmp_path / "尼尔机械纪元.zip").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert [r.cleaned_name for r in results] == ["尼尔机械纪元"]
+
+    def test_looks_like_game_name_unicode(self):
+        assert _looks_like_game_name("尼尔机械纪元")
+        assert _looks_like_game_name("Παιχνίδια")
+
+
+class TestArchSuffixBoundaries:
+    def test_word_tails_not_eaten(self):
+        assert _clean_exe_name("Swarm.exe") == "Swarm"
+        assert _clean_exe_name("Farm.exe") == "Farm"
+        assert _clean_exe_name("Alarm.exe") == "Alarm"
+
+    def test_suffixes_still_stripped(self):
+        assert _clean_exe_name("Game-vk.exe") == "Game"
+        assert _clean_exe_name("GameGL.exe") == "Game"
+        assert _clean_exe_name("DOOMx11.exe") == "DOOM"
+
+
+class TestStoreLauncherBoundaries:
+    def test_game_named_like_launcher_not_mislabeled(self):
+        assert detect_store("E:/Games/Legendary") == ""
+        assert detect_store("E:/My Stuff/battle.net backup/game") == ""
+        assert detect_store("E:/Games/Steam Sale Bundle/game") == ""
+        assert detect_store("E:/Games/Heroic") == ""
+
+    def test_real_launcher_paths_still_detected(self):
+        assert detect_store("C:/Program Files/Heroic/Hollow Knight") == "Heroic"
+        assert detect_store("D:/Battle.net/Hollow Knight") == "Battle.net"
+        assert detect_store("C:/Users/me/.config/legendary/games/Hollow Knight") == "Epic"
+        assert detect_store("D:/Ubisoft Games/Far Cry 4") == "Ubisoft"
+
+
+class TestCompoundJunkArchives:
+    def test_rejected(self):
+        assert _clean_archive_name("windows10.iso") == ""
+        assert _clean_archive_name("win10.iso") == ""
+        assert _clean_archive_name("office2019.iso") == ""
+
+
+class TestRootNormalization:
+    def test_bare_drive_root(self):
+        assert _normalize_root("D:") == "D:/"
+        assert _normalize_root("d:") == "d:/"
+        assert _normalize_root(" D: ") == "D:/"
+        assert _normalize_root("D:/") == "D:/"
+        assert _normalize_root("D:/games") == "D:/games"
+        assert _normalize_root("/mnt/games") == "/mnt/games"
+
+
+class TestLowercaseLanguageTags:
+    def test_stripped(self):
+        assert clean_folder_name("Some Game (en,fr,de)") == "Some Game"
+
+
+class TestParentFallbackGate:
+    def test_junk_parent_never_wins(self, tmp_path):
+        parent = tmp_path / "New Folder"
+        folder = parent / "alpha game"
+        folder.mkdir(parents=True)
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "alpha game"
+
+    def test_good_parent_still_used(self, tmp_path):
+        parent = tmp_path / "Hollow Knight"
+        folder = parent / "game"
+        folder.mkdir(parents=True)
+        result = smart_detect_game_name(folder, clean_folder_name(folder.name))
+        assert result == "Hollow Knight"

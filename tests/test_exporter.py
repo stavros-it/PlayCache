@@ -104,3 +104,31 @@ def test_export_empty_db(tmp_path):
     ws = wb.active
     assert ws.cell(row=1, column=1).value == "GAME NAME"
     assert ws.cell(row=2, column=1).value is None
+
+
+def test_export_leaves_no_tmp_residue(tmp_path):
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample())
+    export_xlsx(db, str(tmp_path / "out.xlsx"))
+    assert (tmp_path / "out.xlsx").is_file()
+    assert not (tmp_path / "out.xlsx.tmp").exists()
+
+
+def test_export_failure_keeps_previous_file(tmp_path, monkeypatch):
+    """A failed re-export must leave the previous good file untouched."""
+    from openpyxl.workbook.workbook import Workbook
+
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample())
+    out = tmp_path / "out.xlsx"
+    export_xlsx(db, str(out))
+    before = out.read_bytes()
+
+    def _boom(self, path):
+        raise OSError(5, "simulated disk-full")
+
+    monkeypatch.setattr(Workbook, "save", _boom)
+    with pytest.raises(OSError, match="may be open in another"):
+        export_xlsx(db, str(out))
+    assert out.read_bytes() == before
+    assert not (tmp_path / "out.xlsx.tmp").exists()

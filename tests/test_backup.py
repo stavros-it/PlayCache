@@ -321,16 +321,66 @@ def test_import_rejects_non_string_folder_path(tmp_path):
 
 
 def test_import_replace_all_is_atomic(tmp_path):
-    """If import_backup with replace_all=True fails mid-way, the original
-    catalog must be preserved (DELETE + upserts in one transaction)."""
+    """If import_backup with replace_all=True fails mid-way (after the DELETE
+    has run), the original catalog must be preserved by the rollback."""
+    import sqlite3
+    from contextlib import contextmanager
+
     db = Database(str(tmp_path / "test.db"))
     db.upsert(_sample(folder_path="/games/Original"))
-    assert db.count() == 1
-    # Build a backup with one valid + one bad row (bad row is skipped, not an
-    # error — so this doesn't actually fail mid-import). Instead, test that
-    # an empty backup with replace_all wipes the DB but in a single tx.
+    db.upsert(_sample(folder_path="/games/Original2"))
+
     db2 = Database(str(tmp_path / "src.db"))
-    out = export_backup(db2, str(tmp_path / "empty.json.gz"))
-    summary = import_backup(db, out, replace_all=True)
-    assert summary["imported"] == 0
-    assert db.count() == 0
+    db2.upsert(_sample(folder_path="/games/New"))
+    out = export_backup(db2, str(tmp_path / "backup.json.gz"))
+
+    real_connect = db.connect
+
+    @contextmanager
+    def failing_connect():
+        with real_connect() as conn:
+            class _FailingConn:
+                def __getattr__(self, name):
+                    return getattr(conn, name)
+
+                def executemany(self, *args, **kwargs):
+                    raise sqlite3.OperationalError(
+                        "simulated crash after DELETE, before upserts"
+                    )
+
+            yield _FailingConn()
+
+    db.connect = failing_connect
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            import_backup(db, out, replace_all=True)
+    finally:
+        db.connect = real_connect
+
+    assert db.count() == 2
+    assert db.get_by_path("/games/Original") is not None
+    assert db.get_by_path("/games/Original2") is not None
+    assert db.get_by_path("/games/New") is None
+
+
+def test_import_skips_non_scalar_column_values(tmp_path):
+    """A row whose TEXT column holds a list/dict is skipped, not a crash."""
+    db = Database(str(tmp_path / "test.db"))
+    envelope = {
+        "format_version": FORMAT_VERSION,
+        "app_version": __version__,
+        "exported_at": "2026-01-01T00:00:00",
+        "count": 2,
+        "games": [
+            _sample(folder_path="/games/OK").to_db_row(),
+            {"folder_path": "/games/bad", "game_name": ["not", "a", "string"]},
+        ],
+    }
+    p = tmp_path / "bad.json.gz"
+    with gzip.open(p, "wt", encoding="utf-8") as fh:
+        json.dump(envelope, fh)
+    summary = import_backup(db, str(p))
+    assert summary["imported"] == 1
+    assert summary["skipped"] == 1
+    assert db.get_by_path("/games/OK") is not None
+    assert db.get_by_path("/games/bad") is None

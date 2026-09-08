@@ -59,7 +59,8 @@ class Cataloger:
         ``"both"`` (keep both as separate entries). If not provided, both are kept.
         ``recursive=True`` descends into grouping folders (no files, only subdirs).
         """
-        folders = list(scan_games(root, recursive=recursive))
+        skip = {s.lower() for s in self.config.skip_folders}
+        folders = list(scan_games(root, recursive=recursive, skip=skip))
         if name_filter:
             nf = name_filter.lower()
             folders = [f for f in folders if nf in f.folder_name.lower()]
@@ -82,42 +83,35 @@ class Cataloger:
             record = self._build_record(scanned)
 
             try:
-                # Check for same game on a different disk (conflict)
-                existing_path = self.db.get_by_path(record.folder_path)
-                conflict = self._find_conflict(record)
-                if conflict and conflict_handler and not dry_run:
-                    summary["conflicts"] += 1
-                    choice = conflict_handler(record, conflict)
-                    if choice == "old":
-                        summary["skipped"] += 1
-                        if progress:
-                            progress(idx, len(folders), record,
-                                     f"kept existing on {conflict.disk}")
-                        continue
-                    if choice == "new":
-                        # Preserve manual overrides from the old entry before
-                        # deleting it, so user edits migrate to the new path.
-                        conflict_overrides = self.db.get_overrides(conflict.folder_path)
-                        conflict_path_to_delete = conflict.folder_path
-                        log.info("Replaced '%s' on %s with copy on %s",
-                                 record.game_name, conflict.disk, record.disk)
-                    else:
-                        conflict_overrides = None
-                        conflict_path_to_delete = None
-                else:
-                    conflict_overrides = None
-                    conflict_path_to_delete = None
+                existing = self.db.get_by_path(record.folder_path)
+                conflict_overrides = None
+                conflict_path_to_delete = None
 
-                # Decide whether we need to fetch
-                existing = existing_path
-                if existing and not rescan:
-                    status = existing.fetch_status
-                    if status == "ok" or (bool(status) and not only_missing):
-                        record = existing
-                        summary["skipped"] += 1
-                        if progress:
-                            progress(idx, len(folders), record, "already catalogued")
-                        continue
+                if existing and not rescan and only_missing and existing.fetch_status == "ok":
+                    record = existing
+                    summary["skipped"] += 1
+                    if progress:
+                        progress(idx, len(folders), record, "already catalogued")
+                    continue
+
+                if existing is None and conflict_handler and not dry_run:
+                    conflict = self._find_conflict(record)
+                    if conflict:
+                        summary["conflicts"] += 1
+                        choice = conflict_handler(record, conflict)
+                        if choice == "old":
+                            summary["skipped"] += 1
+                            if progress:
+                                progress(idx, len(folders), record,
+                                         f"kept existing on {conflict.disk}")
+                            continue
+                        if choice == "new":
+                            conflict_overrides = self.db.get_overrides(
+                                conflict.folder_path
+                            )
+                            conflict_path_to_delete = conflict.folder_path
+                            log.info("Replaced '%s' on %s with copy on %s",
+                                     record.game_name, conflict.disk, record.disk)
 
                 if dry_run:
                     if progress:
@@ -132,7 +126,12 @@ class Cataloger:
                 overrides = conflict_overrides or (
                     self.db.get_overrides(record.folder_path) if existing else {}
                 )
-                record = self._fetch(record)
+                if existing:
+                    record.rawg_id = existing.rawg_id
+                    record.thegamesdb_id = existing.thegamesdb_id
+                    if existing.game_name:
+                        record.game_name = existing.game_name
+                record = self._fetch(record, overrides=overrides)
                 self._apply_overrides(record, overrides)
 
                 if record.fetch_status == "ok":
@@ -177,16 +176,24 @@ class Cataloger:
                     msg = f"{record.data_source or '?'}: {record.fetch_status}"
                     progress(idx, len(folders), record, msg)
 
+            except InterruptedError:
+                raise
             except Exception as exc:
                 # A single-game failure must NOT abort the whole scan.
                 log.exception("Failed to process '%s'", scanned.folder_name)
-                record.fetch_status = "error"
-                record.fetch_message = f"scan error: {exc}"
+                preserved = self.db.get_by_path(record.folder_path)
+                if preserved is not None:
+                    record = preserved
+                    record.fetch_status = "error"
+                    record.fetch_message = f"scan error: {exc}"
+                else:
+                    record.fetch_status = "error"
+                    record.fetch_message = f"scan error: {exc}"
+                    if not record.game_name:
+                        record.game_name = scanned.cleaned_name or scanned.folder_name
+                    if not record.store:
+                        record.store = "Other"
                 summary["error"] += 1
-                if not record.game_name:
-                    record.game_name = scanned.cleaned_name or scanned.folder_name
-                if not record.store:
-                    record.store = "Other"
                 try:
                     self.db.upsert(record)
                     summary["stored"] += 1
@@ -249,7 +256,6 @@ class Cataloger:
             if self.rawg.is_available():
                 record = self.rawg.fetch(record, overrides=overrides)
                 if record.fetch_status == "ok":
-                    self._merge_from_tgdb(record)
                     return record
             else:
                 record.fetch_status = "error"

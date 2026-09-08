@@ -29,6 +29,11 @@ from .theme import (
     BG_HOVER,
     BG_WINDOW,
     BORDER,
+    CHART_AMBER,
+    CHART_EMERALD,
+    CHART_RED,
+    CHART_SKY,
+    CHART_VIOLET,
     STATUS_COLORS,
     TEXT_MUTED,
     TEXT_PRIMARY,
@@ -45,12 +50,12 @@ TRACK = BORDER  # slate-600 — same hue as borders, looks like an empty track
 METRIC_CARDS: list[tuple] = [
     (lambda s: s.get("total", 0), "Total games", ACCENT_LIGHT),
     (lambda s: s.get("by_status", {}).get("ok", 0), "With metadata", STATUS_COLORS["ok"]),
-    (lambda s: s.get("completeness", {}).get("with_cover", 0), "With cover art", "#38BDF8"),
-    (lambda s: s.get("completeness", {}).get("with_release", 0), "With release date", "#A78BFA"),
-    (lambda s: s.get("completeness", {}).get("with_rating", 0), "With user rating", "#FBBF24"),
-    (lambda s: s.get("completeness", {}).get("with_esrb", 0), "With ESRB rating", "#F87171"),
-    (lambda s: s.get("completeness", {}).get("with_metacritic", 0), "With Metacritic", "#34D399"),
-    (lambda s: s.get("completeness", {}).get("with_overrides", 0), "Manually edited", "#A78BFA"),
+    (lambda s: s.get("completeness", {}).get("with_cover", 0), "With cover art", CHART_SKY),
+    (lambda s: s.get("completeness", {}).get("with_release", 0), "With release date", CHART_VIOLET),
+    (lambda s: s.get("completeness", {}).get("with_rating", 0), "With user rating", CHART_AMBER),
+    (lambda s: s.get("completeness", {}).get("with_esrb", 0), "With ESRB rating", CHART_RED),
+    (lambda s: s.get("completeness", {}).get("with_metacritic", 0), "With Metacritic", CHART_EMERALD),
+    (lambda s: s.get("completeness", {}).get("with_overrides", 0), "Manually edited", CHART_VIOLET),
 ]
 
 # Distribution sections: (stats_key, title, accent_color, use_status_colors).
@@ -58,11 +63,11 @@ METRIC_CARDS: list[tuple] = [
 DISTRIBUTIONS: list[tuple] = [
     ("by_status", "By status", ACCENT, True),
     ("by_source", "By data source", ACCENT, False),
-    ("by_store", "By store", "#38BDF8", False),
-    ("by_platform", "By platform", "#A78BFA", False),
-    ("by_esrb", "By ESRB rating", "#F87171", False),
-    ("by_disk", "By disk", "#34D399", False),
-    ("by_year", "By release year", "#FBBF24", False),
+    ("by_store", "By store", CHART_SKY, False),
+    ("by_platform", "By platform", CHART_VIOLET, False),
+    ("by_esrb", "By ESRB rating", CHART_RED, False),
+    ("by_disk", "By disk", CHART_EMERALD, False),
+    ("by_year", "By release year", CHART_AMBER, False),
 ]
 
 # Number of metric cards per row (wraps automatically).
@@ -407,7 +412,7 @@ class StatsDialog(QDialog):
                     accent = d_color
                     break
             is_last = idx == len(sections) - 1
-            if is_last and col != 0:
+            if is_last and col == 0:
                 # Odd number of sections: last one spans both columns.
                 grid.addWidget(self._section(title, data, color=accent, use_status_colors=use_sc),
                                row, 0, 1, GRID_COLUMNS)

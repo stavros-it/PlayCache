@@ -73,7 +73,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 231 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 365 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -101,7 +101,7 @@ Game DB/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.5.0"
+│   ├── __init__.py             # version = "1.5.1"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
@@ -131,19 +131,32 @@ Game DB/
 │       ├── duplicates_dialog.py # fuzzy duplicate finder + resolver
 │       └── main_window.py     # toolbar, filters, table, proxy, status bar
 └── tests/                     # pytest suite
-    ├── test_textutils.py             # 34 tests (NaN/Inf ratings, em-dash, truncate)
-    ├── test_folder_scanner.py        # 112 tests (smart detection + installer/PE evidence + archives)
-    ├── test_db.py                    # 18 tests (upsert_many + UNC paths + int coercion)
+    ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture
+    ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
+    ├── test_folder_scanner.py        # 130 tests (smart detection + archives + unicode + store patterns)
+    ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
+    ├── test_cataloger_behavior.py    # 10 tests (cancel sentinel, only_missing, provider, rescan seeding)
+    ├── test_cataloger_conflicts.py   # 6 tests (new/old/both + override migration + no re-prompt)
+    ├── test_rawg_client.py           # 11 tests (retry, Retry-After, fallbacks, key scrubbing)
+    ├── test_thegamesdb_client.py     # 15 tests (quota capture incl. 403, null fields, includes)
+    ├── test_models_disk.py           # 7 tests (Linux mount walk, octal escapes, cached disk)
     ├── test_manual_overrides.py      # 10 tests + schema migration
-    ├── test_item_delegate.py         # 13 tests — paint regression for PySide6 6.x enums
+    ├── test_item_delegate.py         # 16 tests — paint regression + badge geometry
     ├── test_close_after_scan.py      # 4 tests — Close works after a finished scan (dead QThread refs)
+    ├── test_main_window_fixes.py     # 17 tests — refetch worker races, busy guards, store filter
+    ├── test_scan_dialog_reject.py    # 6 tests — Escape/X routed through the cancel guard
+    ├── test_detail_panel_fixes.py     # 9 tests — website scheme, save re-resolution, no-cover
+    ├── test_settings_env_key.py      # 4 tests — env-sourced API keys never written to ini
+    ├── test_stats_grid.py            # 3 tests — chart grid overlap regression
     ├── test_post_scan_purge.py       # 9 tests — exact-duplicate purge after scan
-    ├── test_backup.py                # 19 tests (atomic write, replace_all atomicity)
-    └── test_exporter.py             # 8 tests (formula injection sanitization)
+    ├── test_backup.py                # 20 tests (atomic write, replace_all atomicity, row validation)
+    ├── test_exporter.py              # 10 tests (atomic save, formula injection sanitization)
+    ├── test_entry_points.py          # 2 smoke tests (run.py / run.pyw --version)
+    └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~5,850 LOC source + ~2,120 LOC tests = ~7,970 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~6,460 LOC source + ~4,250 LOC tests = ~10,710 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -354,14 +367,15 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 231 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 364 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)
   and smoke tests may `print` for user output.
-- **No premature commits** — the repo currently has zero commits; only commit
-  when the user explicitly asks.
+- **Commits follow AGENTS.md** — update PROJECT_CONTEXT.md + ROADMAP.md, pass
+  pytest + ruff, commit with a concise imperative message, push to `origin/main`,
+  and verify the GitHub Actions run is green.
 
 ## 8. Build / run / test commands
 
@@ -411,6 +425,34 @@ git push --tags
 
 ## 9. Known limitations & gotchas
 
+- **Second code audit pass (2026-09-08)** — ~60 findings fixed (see the
+  ROADMAP decision log for the full list). New invariants to preserve:
+  - Scan cancellation propagates: `except InterruptedError: raise` sits BEFORE
+    the per-game `except Exception` in `Cataloger.scan_to_db` — the cancel
+    sentinel must never be converted into an "error" upsert.
+  - Conflict prompts fire only for genuinely NEW folder paths (the
+    already-catalogued skip check runs first) — don't reorder them back.
+  - Rescans seed `rawg_id`/`thegamesdb_id`/`game_name` from the existing row
+    and pass `overrides` to `_fetch`.
+  - API keys are scrubbed from every exception string that reaches
+    `fetch_message` or the logs via `textutils.scrub_query()` — any new
+    client-side error embedding must use it.
+  - `ScanDialog.reject()` routes through `_on_close` (re-entrancy flag
+    `self._closing`); Escape/title-bar X must never bypass the cancel guard.
+  - `RefetchWorker` skips records deleted mid-run and re-reads overrides right
+    before the upsert.
+  - Detail-panel Save re-resolves the source row by `folder_path`
+    (`GamesTableModel.row_by_folder_path`) — model rows go stale across resets.
+  - Env-sourced API keys are never written to `config.ini` by Settings.
+  - `v_excel` is DROP+CREATE on every `init()` and orders `COLLATE NOCASE`.
+  - Backup import skips rows with non-scalar column values; Restore catches
+    `(OSError, ValueError, TypeError, json.JSONDecodeError)`.
+  - `GameRecord.disk` is a `cached_property` — computed once per record.
+  - Still open (deferred deliberately): the startup QuotaWorker and a scan
+    started in the first seconds share one TGDB client/session; conflict
+    "new" doesn't seed IDs from the replaced twin row; `_squash` vs
+    `_norm_key` normalization is unimplemented; grapheme-cluster-safe
+    `truncate()`; `create_shortcut.bat` duplicates `scripts/make_shortcut.py`.
 - **Code audit pass (2026-08-16)** — a full audit fixed 30+ bugs and improvements:
   - **Search query** no longer strips ASCII hyphens inside words (was breaking
     "Half-Life", "Counter-Strike"). Only colon/en-dash/spaced-hyphen subtitles
@@ -538,8 +580,6 @@ git push --tags
   mount-point resolution (walking `st_dev` changes) instead of drive letters.
   A `.desktop` file is generated on Linux by `scripts/make_shortcut.py`.
   macOS is not yet tested but the GUI (Qt) is cross-platform.
-- **No commits yet** — the repo is in its initial uncommitted state. The first
-  commit should establish `main` with the current tree.
 - **RAWG is the primary source** — as of 2026-08-18 RAWG's API is active
   again and serves as the primary metadata source. TheGamesDB is now the
   fallback, and its merge step fills in `esrb_rating` and `thegamesdb_id`

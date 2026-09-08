@@ -9,6 +9,8 @@ from difflib import SequenceMatcher
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
+_QUERY_RE = re.compile(r"\?[^\s]*")
+_SECRET_PARAM_RE = re.compile(r"\b((?:api)?key|token)=[^\s&]*", re.IGNORECASE)
 
 
 def strip_html(text: str | None) -> str:
@@ -34,11 +36,29 @@ def truncate(text: str, max_chars: int = 320) -> str:
 
 
 def clean_search_query(name: str) -> str:
-    """Light extra cleaning for the API query string (e.g. trim trailing edition)."""
+    """Light extra cleaning for the API query string (e.g. trim trailing edition).
+
+    A colon only starts a subtitle when followed by whitespace, so titles
+    like ``Re:Legend`` keep their colon while ``NieR: Automata`` trims to
+    ``NieR``.
+    """
     q = strip_html(name)
-    q = re.sub(r"\s*[:]\s*.*$", "", q)
+    q = re.sub(r"\s*:\s+.*$", "", q)
     q = re.sub(r"\s+[-–—]\s+.*$", "", q)
     return _WS_RE.sub(" ", q).strip()
+
+
+def scrub_query(text: str) -> str:
+    """Strip URL query strings and redact key/token values from error text.
+
+    Used before embedding ``requests`` exception strings into log records,
+    ``fetch_message`` values, or raised ``RuntimeError`` text, so API keys
+    never leak into the DB, GUI, or playcache.log.
+    """
+    if not text:
+        return ""
+    text = _QUERY_RE.sub("", text)
+    return _SECRET_PARAM_RE.sub(r"\1=<redacted>", text)
 
 
 def similarity(a: str, b: str) -> float:

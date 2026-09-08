@@ -58,7 +58,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,  # GUI app — no console window
     disable_windowed_traceback=False,
     icon="playcache/assets/app.ico" if sys.platform == "win32" else None,
@@ -69,7 +69,7 @@ coll = COLLECT(
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     name="PlayCache",
 )

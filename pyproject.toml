@@ -35,9 +35,9 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/StavrosAntoniou/PlayCache"
-"Repository" = "https://github.com/StavrosAntoniou/PlayCache"
-"Issues" = "https://github.com/StavrosAntoniou/PlayCache/issues"
+"Homepage" = "https://github.com/stavros-it/PlayCache"
+"Repository" = "https://github.com/stavros-it/PlayCache"
+"Issues" = "https://github.com/stavros-it/PlayCache/issues"
 
 [tool.setuptools.packages.find]
 include = ["playcache*"]

@@ -45,7 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_games_store        ON games(store);
 
 # A view that mirrors the 6-column reference Excel layout (1 row per game, ordered)
 EXCEL_VIEW = """
-CREATE VIEW IF NOT EXISTS v_excel AS
+DROP VIEW IF EXISTS v_excel;
+CREATE VIEW v_excel AS
 SELECT
     COALESCE(NULLIF(game_name, ''), folder_name) AS "GAME NAME",
     COALESCE(NULLIF(platform, ''), 'PC')         AS "PLATFORM",
@@ -54,7 +55,7 @@ SELECT
     game_type                                     AS "GAME TYPE",
     short_description                             AS "SHORT DESCRIPTION"
 FROM games
-ORDER BY "GAME NAME";
+ORDER BY "GAME NAME" COLLATE NOCASE, "GAME NAME";
 """
 
 COLUMNS = [

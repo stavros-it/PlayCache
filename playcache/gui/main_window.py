@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, Signal
+from PySide6.QtCore import QSortFilterProxyModel, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import __version__
 from ..backup import export_backup, import_backup
 from ..cataloger import Cataloger
 from ..config import Config
@@ -61,15 +62,15 @@ class GamesProxyModel(QSortFilterProxyModel):
 
     def set_search(self, text: str) -> None:
         self._search = (text or "").lower()
-        self.invalidateFilter()
+        self.invalidate()
 
     def set_store(self, store: str) -> None:
         self._store = store
-        self.invalidateFilter()
+        self.invalidate()
 
     def set_status(self, status: str) -> None:
         self._status = status
-        self.invalidateFilter()
+        self.invalidate()
 
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
         source = self.sourceModel()
@@ -152,12 +153,8 @@ class GamesProxyModel(QSortFilterProxyModel):
 
 
 class MainWindow(QMainWindow):
-    scan_requested = Signal(str, bool, bool, bool, str, int, bool)  # forwarded
-
     def __init__(self, config: Config, parent: QWidget | None = None):
         super().__init__(parent)
-        from ..__init__ import __version__
-
         self.setWindowTitle(f"PlayCache {__version__}")
         self.resize(1280, 800)
         self.setStyleSheet(DARK_QSS)
@@ -194,7 +191,7 @@ class MainWindow(QMainWindow):
         avoid blocking the UI. TGDB is now the fallback provider, but its
         quota is still displayed in the status bar.
         """
-        from PySide6.QtCore import QThread
+        from PySide6.QtCore import QThread, Signal
 
         tgdb = self._cataloger.tgdb
         if not tgdb.is_available():
@@ -216,7 +213,14 @@ class MainWindow(QMainWindow):
 
         self._quota_worker = QuotaWorker(tgdb, parent=self)
         self._quota_worker.done.connect(self._update_status_bar)
+        self._quota_worker.finished.connect(self._on_quota_thread_finished)
         self._quota_worker.start()
+
+    def _on_quota_thread_finished(self) -> None:
+        worker = self.sender()
+        worker.deleteLater()
+        if getattr(self, "_quota_worker", None) is worker:
+            self._quota_worker = None
 
     # ------------------------------------------------------------------ #
     # UI construction
@@ -312,7 +316,7 @@ class MainWindow(QMainWindow):
 
         f_layout.addWidget(QLabel("Store"))
         self.store_combo = QComboBox()
-        self.store_combo.addItems(["All", "Steam", "GOG", "Epic", "Other"])
+        self.store_combo.addItems(["All"])
         self.store_combo.currentTextChanged.connect(self._proxy.set_store)
         f_layout.addWidget(self.store_combo)
 
@@ -352,7 +356,7 @@ class MainWindow(QMainWindow):
 
         # Detail panel
         self.detail = DetailPanel(self._db, self._model, self._image_cache, parent=self)
-        self.detail.refetch_btn.clicked.connect(self._refetch_selected)
+        self.detail.refetch_btn.clicked.connect(lambda: self._refetch_selected())
         splitter.addWidget(self.detail)
 
         splitter.setStretchFactor(0, 0)
@@ -378,6 +382,28 @@ class MainWindow(QMainWindow):
         records = list(self._db.all_records())
         self._model.set_records(records)
         self._auto_resize_columns()
+        self._refresh_store_filter(records)
+
+    def _refresh_store_filter(self, records: list[GameRecord]) -> None:
+        """Rebuild the Store filter combo from the catalog's actual values.
+
+        The hardcoded list could not show rows whose store is a joined value
+        ("GOG / Steam") or an uncommon store ("Origin", "Ubisoft", ...) —
+        those rows were invisible under every filter except "All". Empty
+        stores map to "Other", matching ``filterAcceptsRow``. The current
+        selection is preserved while it still exists in the data.
+        """
+        current = self.store_combo.currentText()
+        items = ["All", *sorted({rec.store or "Other" for rec in records})]
+        self.store_combo.blockSignals(True)
+        self.store_combo.clear()
+        self.store_combo.addItems(items)
+        if current in items:
+            self.store_combo.setCurrentText(current)
+        else:
+            self.store_combo.setCurrentIndex(0)
+        self.store_combo.blockSignals(False)
+        self._proxy.set_store(self.store_combo.currentText())
 
     def _on_field_edited(self, folder_path: str, field: str, value: str) -> None:
         """Persist an inline table edit to the DB (called via model signal)."""
@@ -418,12 +444,17 @@ class MainWindow(QMainWindow):
                 self.table.setColumnWidth(col, max_w)
 
     def _on_selection_changed(self, *_args) -> None:
-        indexes = self.table.selectionModel().selectedRows()
+        selection_model = self.table.selectionModel()
+        indexes = selection_model.selectedRows()
         if not indexes:
             self.detail.set_record(None)
             return
+        current = self.table.currentIndex()
+        if current.isValid() and any(idx.row() == current.row() for idx in indexes):
+            proxy_index = self._proxy.index(current.row(), 0)
+        else:
+            proxy_index = indexes[0]
         # Map proxy index -> source row
-        proxy_index = indexes[0]
         source_index = self._proxy.mapToSource(proxy_index)
         row = source_index.row()
         record = self._model.record_at(row)
@@ -435,7 +466,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     # Actions
     # ------------------------------------------------------------------ #
+    def _refetch_busy(self) -> bool:
+        return worker_is_running(getattr(self, "_refetch_worker", None))
+
     def _open_scan_dialog(self) -> None:
+        if self._refetch_busy():
+            QMessageBox.warning(
+                self, "Busy",
+                "A re-fetch is already running. Please wait for it to finish.",
+            )
+            return
         dialog = ScanDialog(self._cataloger, self._config, parent=self)
         dialog.exec()
         # Purge exact-name duplicates the scan may have introduced
@@ -468,6 +508,13 @@ class MainWindow(QMainWindow):
             QFormLayout,
             QLineEdit,
         )
+
+        if self._refetch_busy():
+            QMessageBox.warning(
+                self, "Busy",
+                "A re-fetch is already running. Please wait for it to finish.",
+            )
+            return
 
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Game")
@@ -536,7 +583,12 @@ class MainWindow(QMainWindow):
         progress.close()
         if not record.store:
             record.store = "Other"
-        self._db.upsert(record)
+        try:
+            self._db.upsert(record)
+        except Exception as e:  # noqa: BLE001 - persisting must not crash the slot
+            log.warning("Could not persist added game '%s': %s", name, e)
+            self.statusBar().showMessage(f"Could not save '{name}': {e}", 5000)
+            return
 
         self._refresh_table()
         self._update_status_bar()
@@ -599,7 +651,13 @@ class MainWindow(QMainWindow):
                 )
 
     def _run_refetch_all(self) -> None:
-        self._run_refetch(list(self._db.all_records()))
+        records = list(self._db.all_records())
+        if not records:
+            self.statusBar().showMessage(
+                "Catalog is empty — nothing to re-fetch.", 5000
+            )
+            return
+        self._run_refetch(records)
 
     def _run_refetch(self, records: list[GameRecord], provider: str = "auto") -> None:
         """Re-fetch metadata for *records* on a background thread.
@@ -608,7 +666,7 @@ class MainWindow(QMainWindow):
         refetch stays synchronous (see ``_refetch_selected``) for instant
         detail-panel feedback; 2+ rows use this worker to avoid freezing the UI.
         """
-        if worker_is_running(getattr(self, "_refetch_worker", None)):
+        if self._refetch_busy():
             QMessageBox.warning(
                 self, "Busy",
                 "A re-fetch is already running. Please wait for it to finish.",
@@ -632,7 +690,7 @@ class MainWindow(QMainWindow):
 
             def run(self_inner):
                 total = len(self_inner._records)
-                ok = not_found = error = 0
+                ok = not_found = error = skipped = 0
                 for idx, rec in enumerate(self_inner._records, 1):
                     if self_inner._cancelled:
                         break
@@ -644,6 +702,15 @@ class MainWindow(QMainWindow):
                         self_inner._cataloger._apply_overrides(rec, overrides)
                         if not rec.store:
                             rec.store = "Other"
+                        if self_inner._cataloger.db.get_by_path(rec.folder_path) is None:
+                            skipped += 1
+                            self_inner.progress.emit(
+                                idx, total,
+                                f"skipped (removed): {rec.game_name}",
+                            )
+                            continue
+                        overrides = self_inner._cataloger.db.get_overrides(rec.folder_path)
+                        self_inner._cataloger._apply_overrides(rec, overrides)
                         self_inner._cataloger.db.upsert(rec)
                     except Exception as e:  # noqa: BLE001 - per-game guard
                         rec.fetch_status = "error"
@@ -661,7 +728,8 @@ class MainWindow(QMainWindow):
                         f"{rec.data_source or '?'}: {rec.fetch_status} - {rec.game_name}",
                     )
                 self_inner.finished_summary.emit(
-                    {"ok": ok, "not_found": not_found, "error": error, "total": total}
+                    {"ok": ok, "not_found": not_found, "error": error,
+                     "skipped": skipped, "total": total}
                 )
 
         self._refetch_worker = RefetchWorker(self._cataloger, records, provider, parent=self)
@@ -678,7 +746,7 @@ class MainWindow(QMainWindow):
 
     def _on_refetch_progress(self, idx: int, total: int, message: str) -> None:
         self.statusBar().showMessage(f"[{idx}/{total}] {message}")
-        self._update_status_bar()
+        self._render_status_label()
 
     def _on_refetch_finished(self, summary: dict) -> None:
         self._refresh_table()
@@ -688,6 +756,7 @@ class MainWindow(QMainWindow):
             f"Re-fetched {summary.get('total', 0)} games:\n"
             f"  OK: {summary.get('ok', 0)}\n"
             f"  Not found: {summary.get('not_found', 0)}\n"
+            f"  Skipped: {summary.get('skipped', 0)}\n"
             f"  Errors: {summary.get('error', 0)}",
         )
 
@@ -695,7 +764,7 @@ class MainWindow(QMainWindow):
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
             return
-        if worker_is_running(getattr(self, "_refetch_worker", None)):
+        if self._refetch_busy():
             QMessageBox.warning(
                 self, "Busy",
                 "A re-fetch is already running. Please wait for it to finish.",
@@ -714,13 +783,23 @@ class MainWindow(QMainWindow):
         if len(records) == 1:
             record = records[0]
             row = rows[0]
-            overrides = self._db.get_overrides(record.folder_path)
-            record.fetch_status = "pending"
-            record = self._cataloger._fetch(record, provider=provider, overrides=overrides)
-            self._cataloger._apply_overrides(record, overrides)
-            if not record.store:
-                record.store = "Other"
-            self._db.upsert(record)
+            try:
+                overrides = self._db.get_overrides(record.folder_path)
+                record.fetch_status = "pending"
+                record = self._cataloger._fetch(record, provider=provider,
+                                                 overrides=overrides)
+                self._cataloger._apply_overrides(record, overrides)
+                if not record.store:
+                    record.store = "Other"
+                self._db.upsert(record)
+            except Exception as e:  # noqa: BLE001 - persisting must not crash the slot
+                log.warning("Re-fetch failed for %s: %s", record.folder_path, e)
+                record.fetch_status = "error"
+                record.fetch_message = f"refetch error: {e}"
+                self._model.update_record(row, record)
+                self.detail.set_record(record, row=row)
+                self.statusBar().showMessage(f"Re-fetch failed: {e}", 5000)
+                return
             self._model.update_record(row, record)
             self.detail.set_record(record, row=row)
             self._update_status_bar()
@@ -794,7 +873,7 @@ class MainWindow(QMainWindow):
             replace_all = False
         try:
             summary = import_backup(self._db, path, replace_all=replace_all)
-        except (OSError, ValueError, json.JSONDecodeError) as e:
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
             QMessageBox.critical(self, "Restore failed", str(e))
             return
         mode = "Replaced" if replace_all else "Merged"
@@ -806,6 +885,7 @@ class MainWindow(QMainWindow):
             f"{summary['skipped']} row(s) skipped.",
         )
         self._refresh_table()
+        self._update_status_bar()
 
     def _show_stats(self) -> None:
         stats = self._db.stats()
@@ -818,11 +898,13 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         # Guard against swapping API clients while a worker thread is mid-scan.
-        if worker_is_running(getattr(self, "_refetch_worker", None)):
+        if self._refetch_busy() or worker_is_running(
+            getattr(self, "_quota_worker", None)
+        ):
             QMessageBox.warning(
                 self, "Busy",
-                "A re-fetch is running. Please wait for it to finish before "
-                "changing settings.",
+                "A re-fetch or quota fetch is running. Please wait for it "
+                "to finish before changing settings.",
             )
             return
         dialog = SettingsDialog(self._config, parent=self)
@@ -963,18 +1045,29 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def _setup_statusbar_version(self) -> None:
         """Add a permanent version label on the right of the status bar."""
-        from ..__init__ import __version__
-
         lbl = QLabel(f"v{__version__}")
         lbl.setStyleSheet(f"color: {TEXT_MUTED}; padding: 0 6px;")
         self.statusBar().addPermanentWidget(lbl)
 
     def _update_status_bar(self) -> None:
+        """Refresh the permanent status label, including DB count/stats queries."""
         total = self._db.count()
         stats = self._db.stats()
-        ok = stats["by_status"].get("ok", 0)
-        not_found = stats["by_status"].get("not_found", 0)
-        error = stats["by_status"].get("error", 0)
+        self._status_counts = (
+            total,
+            stats["by_status"].get("ok", 0),
+            stats["by_status"].get("not_found", 0),
+            stats["by_status"].get("error", 0),
+        )
+        self._render_status_label()
+
+    def _render_status_label(self) -> None:
+        """Rebuild the status label from cached counts + live API counters.
+
+        Touches no database: the RAWG call count and TGDB quota live on the
+        API clients, so this is safe to call per refetch progress tick.
+        """
+        total, ok, not_found, error = getattr(self, "_status_counts", (0, 0, 0, 0))
         rawg_client = self._cataloger.rawg
         if rawg_client.is_available():
             rawg = f"RAWG: {rawg_client.request_count} calls"
@@ -1033,6 +1126,7 @@ class MainWindow(QMainWindow):
                 worker.terminate()
                 worker.wait(2000)
         quota_worker = getattr(self, "_quota_worker", None)
-        if worker_is_running(quota_worker):
-            quota_worker.wait(5000)
+        if worker_is_running(quota_worker) and not quota_worker.wait(5000):
+            quota_worker.terminate()
+            quota_worker.wait(2000)
         event.accept()

@@ -53,20 +53,21 @@ CONTAINER_NAMES = {
 LIBRARY_ROOTS: list[tuple[str, str]] = [
     (r"steamapps[\\/]+common", "Steam"),
     (r"steamlibrary", "Steam"),
-    (r"\bsteam\b", "Steam"),
+    (r"(?:^|[\\/])steam[\\/]", "Steam"),
     (r"gog galaxy", "GOG"),
     (r"\bgog games?\b", "GOG"),
     (r"\bgog\b[\\/]", "GOG"),
     (r"epic games[\\/]+", "Epic"),
     (r"origin games", "Origin"),
+    (r"ubisoft games[\\/]", "Ubisoft"),
     (r"\bubisoft\b[\\/]", "Ubisoft"),
-    (r"battle\.?net", "Battle.net"),
-    (r"\bheroic\b", "Heroic"),
-    (r"\blutris\b", "Lutris"),
-    (r"\bbottles\b", "Bottles"),
-    (r"\bminigalaxy\b", "GOG"),
-    (r"\bgamehub\b", "GameHub"),
-    (r"\blegendary\b", "Epic"),
+    (r"(?:^|[\\/])battle\.?net[\\/]", "Battle.net"),
+    (r"(?:^|[\\/])heroic[\\/]", "Heroic"),
+    (r"(?:^|[\\/])lutris[\\/]", "Lutris"),
+    (r"(?:^|[\\/])bottles[\\/]", "Bottles"),
+    (r"(?:^|[\\/])minigalaxy[\\/]", "GOG"),
+    (r"(?:^|[\\/])gamehub[\\/]", "GameHub"),
+    (r"(?:^|[\\/])legendary[\\/]", "Epic"),
 ]
 
 # Noise tokens to strip from folder names before searching APIs.
@@ -93,7 +94,7 @@ NOISE_REGEX = [
     re.compile(r"\[[^\]]*\]"),                 # [Anything In Brackets]
     re.compile(r"\([^)]*(?:crack|fix|repack|rip|multi|online|dlc|edition|build|v\d|gog|windows)[^)]*\)", re.IGNORECASE),
     # Disc-dump tags: (USA), (Europe), (Rev 2), (En,Fr,De,Es,It)
-    re.compile(r"\((?:Rev\s*\d+|USA|Europe|Japan|World|Asia|Australia|EUR|JPN|(?:[A-Z][a-z],)+[A-Z][a-z])\)"),
+    re.compile(r"\((?:Rev\s*\d+|USA|Europe|Japan|World|Asia|Australia|EUR|JPN|(?:[A-Za-z]{2},)+[A-Za-z]{2})\)"),
     re.compile(r"[_]+"),                       # underscores -> space (before version rule,
                                                # so "_v1.0.4" matches the version pattern)
     re.compile(r"\b(?:v|build\.?|ver\.?|update)\s*\d[\d.]*\b", re.IGNORECASE),  # v1.2 / Build 12345
@@ -135,10 +136,8 @@ _NON_GAME_EXES = {
 
 # Architecture/platform suffixes to strip from executable names.
 _ARCH_SUFFIXES = re.compile(
-    r"(?:[_\-]?(?:x64|x86|win64|win32|vk|vulkan|dx11|dx12|"
-    r"d3d11|d3d12|64bit|32bit|"
-    r"linux|linux64|i386|arm|aarch64|appimage|gl|ogl|x11|wayland))+$",
-    re.IGNORECASE,
+    r"(?:[_\-]?(?i:x64|x86|win64|win32|dx11|dx12|d3d11|d3d12|64bit|32bit|i386|aarch64|linux64|x11)"
+    r"|(?:(?<=[a-z])(?=[A-Z])|[_\-]|(?<=\d))(?i:vk|vulkan|gl|ogl|wayland|linux|appimage|arm))+$"
 )
 
 # CamelCase splitting patterns
@@ -226,7 +225,7 @@ def clean_folder_name(name: str) -> str:
             low = s.lower().strip(".,_/()[]{}")
             if not low or low in NOISE_TOKENS:
                 continue
-            if not re.search(r"[A-Za-z0-9]", s):
+            if not any(ch.isalnum() for ch in s):
                 continue
             good.append(s.strip(".,_/()[]{}"))
         if not good:
@@ -303,6 +302,13 @@ def _list_dirs(path: Path, _visited: set[str] | None = None) -> list[Path]:
         return []
 
 
+def _normalize_root(root: str) -> str:
+    stripped = root.strip()
+    if re.fullmatch(r"[A-Za-z]:", stripped):
+        return stripped + "/"
+    return stripped
+
+
 def scan_games(
     root: str,
     recursive: bool = False,
@@ -329,6 +335,7 @@ def scan_games(
     skip : set[str], optional
         Extra folder names (lowercased) to skip beyond DEFAULT_SKIP.
     """
+    root = _normalize_root(root)
     root_path = Path(root)
     if not root_path.exists():
         raise FileNotFoundError(f"Path does not exist: {root}")
@@ -336,6 +343,7 @@ def scan_games(
         raise NotADirectoryError(f"Expected a folder/drive, got a file: {root}")
 
     skip = (skip or set()) | DEFAULT_SKIP
+    _steam_manifest_cache.clear()
     visited: set[str] = set()
     try:
         root_real = os.path.realpath(root_path)
@@ -393,38 +401,41 @@ def _resolve(
         subdirs = [e for e in entries if e.is_dir() and not _is_hidden(e)]
         if not has_files and len(subdirs) >= 1:
             for child in sorted(subdirs, key=lambda p: p.name.lower()):
-                if _should_skip(child.name):
+                if _should_skip(child.name) or child.name.lower() in skip:
                     continue
                 yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
             return
 
     archives = _archive_entries(path)
-    if archives and not _collect_exe_paths(path):
-        folder_cleaned = clean_folder_name(path.name)
-        folder_key = _squash(folder_cleaned)
-        matches_folder = bool(folder_key) and any(
-            _squash(a.cleaned_name) == folder_key for a in archives
-        )
-        single_part_set = _part_sets(path) == 1
-        if (matches_folder or single_part_set) and _title_quality(folder_cleaned) > 0:
-            yield _make_scanned(path, store=store)
+    exe_paths: list[Path] | None = None
+    if archives:
+        exe_paths = _collect_exe_paths(path)
+        if not exe_paths:
+            folder_cleaned = clean_folder_name(path.name)
+            folder_key = _squash(folder_cleaned)
+            matches_folder = bool(folder_key) and any(
+                _squash(a.cleaned_name) == folder_key for a in archives
+            )
+            single_part_set = _part_sets(path) == 1
+            if (matches_folder or single_part_set) and _title_quality(folder_cleaned) > 0:
+                yield _make_scanned(path, store=store, exe_paths=exe_paths)
+                return
+            yield from archives
+            for child in _list_dirs(path, _visited):
+                if _should_skip(child.name) or child.name.lower() in skip:
+                    continue
+                yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
             return
-        yield from archives
-        for child in _list_dirs(path, _visited):
-            if _should_skip(child.name) or child.name.lower() in skip:
-                continue
-            yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
-        return
 
-    yield _make_scanned(path, store=store)
+    yield _make_scanned(path, store=store, exe_paths=exe_paths)
 
 
-def _make_scanned(path: Path, store: str) -> ScannedFolder:
+def _make_scanned(path: Path, store: str, exe_paths: list[Path] | None = None) -> ScannedFolder:
     name = path.name
     cleaned = clean_folder_name(name)
     # Smart-detect: try metadata files, GOG setup exes, and game .exe files
     # to find a better name than the (possibly noisy) folder name.
-    cleaned = smart_detect_game_name(path, cleaned)
+    cleaned = smart_detect_game_name(path, cleaned, exe_paths)
     platform = detect_platform(str(path))
     resolved_store = detect_store(str(path), api_store_hint=store) or store
     return ScannedFolder(
@@ -448,7 +459,7 @@ def _looks_like_game_name(name: str) -> bool:
         return False
     if n.isdigit():
         return False
-    return bool(re.search(r"[A-Za-z]", n))
+    return any(ch.isalpha() for ch in n)
 
 
 def _clean_exe_name(filename: str) -> str:
@@ -480,14 +491,14 @@ def _clean_gog_setup_name(filename: str) -> str:
     tokens = body.split("_")
     kept = []
     for t in tokens:
-        if not t:
+        if not t or not any(ch.isalnum() for ch in t):
             continue
         low = t.lower().strip("()")
-        # Skip ID patterns: (90803)
-        if re.match(r"^\(\d+\)$", t):
+        # Skip ID patterns: (90803), multi-volume (88455)-1
+        if re.match(r"^\(\d+\)(?:-\d+)?$", t):
             continue
         # Skip version patterns: 1.4.0.0, 1.03.1628077, 1.0d, v2
-        if re.match(r"^v?\d+(?:\.\d+)*[a-z]?$", t, re.IGNORECASE):
+        if re.match(r"^(?:v\d+(?:\.\d+)*[a-z]?|\d+(?:\.\d+)+[a-z]?)$", t, re.IGNORECASE):
             continue
         # Skip GOG/store/format tags
         if low in _GOG_SETUP_NOISE:
@@ -679,6 +690,9 @@ def _read_gog_metadata(folder: Path) -> str | None:
             except (OSError, ValueError, json.JSONDecodeError) as e:
                 log.debug("Cannot read GOG metadata %s: %s", entry, e)
                 continue
+            if not isinstance(data, dict):
+                log.debug("Skipping non-object GOG metadata %s", entry)
+                continue
             name = data.get("name") or data.get("Name")
             if not name or not _looks_like_game_name(str(name)):
                 continue
@@ -856,6 +870,8 @@ def _clean_archive_name(filename: str) -> str:
         return _clean_gog_setup_name(filename)
     if stem.lower() in _ARCHIVE_JUNK_NAMES:
         return ""
+    if re.match(r"^(?:windows|win|office|adobe)[\s._-]*\d*$", stem, re.IGNORECASE):
+        return ""
     stem = _PART_TOKEN_RE.sub(" ", stem)
     stem = _URL_PREFIX_RE.sub(" ", stem)
     stem = _BITNESS_RE.sub(" ", stem)
@@ -954,13 +970,25 @@ def _title_quality(name: str) -> float:
 
 def _norm_key(name: str) -> str:
     """Normalize a candidate name so independent sources can be compared."""
-    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return re.sub(r"[^\w]+", " ", name.lower()).strip()
 
 
-def _installer_candidates(folder: Path) -> list[str]:
+_PARENT_JUNK_TOKENS = _JUNK_TOKENS | {
+    "new", "folder", "folders", "tmp", "temp", "unsorted", "downloads",
+    "backups", "misc", "my", "stuff",
+}
+
+
+def _has_parent_junk(name: str) -> bool:
+    return any(
+        t.lower() in _PARENT_JUNK_TOKENS for t in re.split(r"[\s:;,.\-—–]+", name) if t
+    )
+
+
+def _installer_candidates(exe_paths: list[Path]) -> list[str]:
     """Game titles extracted from installer executable filenames."""
     names: list[str] = []
-    for p in _collect_exe_paths(folder):
+    for p in exe_paths:
         if not _looks_like_installer(p.name):
             continue
         name = _clean_installer_name(p.name)
@@ -969,7 +997,9 @@ def _installer_candidates(folder: Path) -> list[str]:
     return names
 
 
-def _best_name_from_evidence(folder_path: Path, cleaned_folder_name: str) -> str:
+def _best_name_from_evidence(
+    folder_path: Path, cleaned_folder_name: str, exe_paths: list[Path] | None = None
+) -> str:
     """Pick the best game name by scoring evidence from every folder signal.
 
     Candidates (with source weights): installer filenames 0.90, PE
@@ -987,11 +1017,14 @@ def _best_name_from_evidence(folder_path: Path, cleaned_folder_name: str) -> str
         if name and _looks_like_game_name(name):
             candidates.append((name, weight, source))
 
-    for name in _installer_candidates(folder_path):
+    if exe_paths is None:
+        exe_paths = _collect_exe_paths(folder_path)
+
+    for name in _installer_candidates(exe_paths):
         add(name, 0.90, "installer")
 
     sized: list[tuple[Path, int]] = []
-    for p in _collect_exe_paths(folder_path):
+    for p in exe_paths:
         stem = p.stem.lower()
         if stem in _NON_GAME_EXES or stem in _NON_GAME_SCRIPTS or stem.startswith("setup_"):
             continue
@@ -1014,7 +1047,9 @@ def _best_name_from_evidence(folder_path: Path, cleaned_folder_name: str) -> str
     else:
         parent = folder_path.parent
         if not _is_container(parent.name):
-            add(clean_folder_name(parent.name), 0.40, "parent")
+            parent_name = clean_folder_name(parent.name)
+            if _title_quality(parent_name) >= 0.55 and not _has_parent_junk(parent_name):
+                add(parent_name, 0.40, "parent")
 
     for p, size in sized:
         cleaned = _clean_exe_name(p.name)
@@ -1046,7 +1081,9 @@ def _best_name_from_evidence(folder_path: Path, cleaned_folder_name: str) -> str
     return best[1]
 
 
-def smart_detect_game_name(folder_path: Path, cleaned_folder_name: str) -> str:
+def smart_detect_game_name(
+    folder_path: Path, cleaned_folder_name: str, exe_paths: list[Path] | None = None
+) -> str:
     """Smart-detect the game name from multiple sources.
 
     Authoritative metadata wins outright, in order of reliability:
@@ -1083,5 +1120,5 @@ def smart_detect_game_name(folder_path: Path, cleaned_folder_name: str) -> str:
     if name and _looks_like_game_name(name):
         return name
 
-    return _best_name_from_evidence(folder_path, cleaned_folder_name)
+    return _best_name_from_evidence(folder_path, cleaned_folder_name, exe_paths)
 

@@ -31,6 +31,7 @@ from .models import GameRecord
 from .textutils import (
     best_match,
     clean_search_query,
+    scrub_query,
     strip_html,
     truncate,
 )
@@ -84,6 +85,10 @@ class TheGamesDBClient:
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
                 if resp.status_code == 429:
+                    try:
+                        self._capture_quota(resp.json())
+                    except Exception:
+                        pass
                     # Honor Retry-After header if present (don't burn retries).
                     retry_after = resp.headers.get("Retry-After")
                     if retry_after:
@@ -105,17 +110,25 @@ class TheGamesDBClient:
                     continue
                 # 4xx (except 429) is non-retryable: bad key, forbidden, not found.
                 if 400 <= resp.status_code < 500:
+                    try:
+                        self._capture_quota(resp.json())
+                    except Exception:
+                        pass
                     raise RuntimeError(f"HTTP {resp.status_code} from TheGamesDB")
                 resp.raise_for_status()
                 data = resp.json()
-                self._capture_quota(data)
-                return data
+                if isinstance(data, dict):
+                    self._capture_quota(data)
+                    return data
+                raise RuntimeError("malformed API response")
             except (requests.RequestException, ValueError) as e:
                 last_exc = e
                 wait = min(2 ** attempt, 10)
-                log.warning("TGDB request error (%s), retry %d/%d", e, attempt, self.max_retries)
+                log.warning("TGDB request error (%s), retry %d/%d", scrub_query(str(e)), attempt, self.max_retries)
                 time.sleep(wait)
-        raise RuntimeError(f"TheGamesDB request failed after {self.max_retries} retries: {last_exc}")
+        raise RuntimeError(
+            f"TheGamesDB request failed after {self.max_retries} retries: {scrub_query(str(last_exc))}"
+        )
 
     def _capture_quota(self, data: dict) -> None:
         """Track rate-limit fields from the API response (if present)."""
@@ -135,10 +148,10 @@ class TheGamesDBClient:
         """Return a snapshot of the current TGDB rate-limit quota.
 
         Keys: ``remaining`` (int|None), ``extra`` (int|None),
-        ``reset_seconds`` (int|None), ``monthly_limit`` (int|None).
-        The monthly limit is inferred as ``remaining + (requests made so far)``
-        only on the very first call; otherwise we report ``None``. In practice
-        the documented public-tier limit is 1000 requests/month.
+        ``reset_seconds`` (int|None), ``monthly_limit`` (int).
+        ``monthly_limit`` is the hardcoded documented public-tier limit
+        (1000 requests/month); the API does not report it, so it is not
+        inferred from usage.
         """
         return {
             "remaining": self.remaining_monthly_allowance,
@@ -164,7 +177,8 @@ class TheGamesDBClient:
             self._genres = {int(k): v.get("name", "") for k, v in raw.items()}
             time.sleep(self.delay)
         except (requests.RequestException, ValueError, RuntimeError) as e:
-            log.warning("TGDB genre lookup failed (will retry next call): %s", e)
+            log.warning("TGDB genre lookup failed (will retry next call): %s", scrub_query(str(e)))
+            time.sleep(self.delay)
             # Leave _genres as None so the next call retries.
         return self._genres or {}
 
@@ -187,7 +201,8 @@ class TheGamesDBClient:
                     cache[int(k)] = v.get("name", "")
                 time.sleep(self.delay)
             except (requests.RequestException, ValueError, RuntimeError) as e:
-                log.warning("TGDB %s lookup failed for ids %s: %s", kind, unknown, e)
+                log.warning("TGDB %s lookup failed for ids %s: %s", kind, unknown, scrub_query(str(e)))
+                time.sleep(self.delay)
         names = [cache[i] for i in ids if cache.get(i)]
         return " / ".join(names)
 
@@ -197,7 +212,7 @@ class TheGamesDBClient:
     def search(self, query: str) -> tuple[list[dict], dict]:
         """Return (games, includes) for a name search."""
         data = self._get("/Games/ByGameName", {
-            "name": query, "fields": FIELDS, "include": "boxart",
+            "name": query, "fields": FIELDS, "include": "boxart,platform",
         })
         games = (data.get("data") or {}).get("games", []) or []
         includes = data.get("include") or {}
@@ -207,7 +222,7 @@ class TheGamesDBClient:
     def get_by_id(self, game_id: int) -> tuple[dict | None, dict]:
         """Return (game, includes) for a direct ID lookup."""
         data = self._get("/Games/ByGameID", {
-            "id": game_id, "fields": FIELDS, "include": "boxart",
+            "id": game_id, "fields": FIELDS, "include": "boxart,platform",
         })
         games = (data.get("data") or {}).get("games", []) or []
         includes = data.get("include") or {}
@@ -240,7 +255,8 @@ class TheGamesDBClient:
                     return record
                 log.warning("TGDB fetch-by-id %s returned no game, falling back to search", tgdb_id)
             except (requests.RequestException, ValueError, RuntimeError) as e:
-                log.warning("TGDB fetch-by-id %s failed, falling back to search: %s", tgdb_id, e)
+                log.warning("TGDB fetch-by-id %s failed, falling back to search: %s",
+                            tgdb_id, scrub_query(str(e)))
 
         query = clean_search_query(record.game_name or record.folder_name)
         if not query:
@@ -252,7 +268,7 @@ class TheGamesDBClient:
             games, includes = self.search(query)
         except (requests.RequestException, ValueError, RuntimeError) as e:
             record.fetch_status = "error"
-            record.fetch_message = f"TGDB search error: {e}"
+            record.fetch_message = f"TGDB search error: {scrub_query(str(e))}"
             return record
 
         candidate = best_match(

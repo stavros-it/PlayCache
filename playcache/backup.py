@@ -60,8 +60,11 @@ def export_backup(db: Database, output_path: str) -> str:
     try:
         with gzip.open(tmp, "wt", encoding="utf-8") as fh:
             fh.write(payload)
-            fh.flush()
-            os.fsync(fh.fileno())
+        fd = os.open(tmp, os.O_RDWR)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
         os.replace(tmp, out)
     except OSError as e:
         if tmp.exists():
@@ -136,6 +139,9 @@ def import_backup(db: Database, input_path: str, *, replace_all: bool = False) -
             skipped += 1
             continue
         clean = {c: v for c, v in row.items() if c in COLUMNS and v is not None}
+        if any(not isinstance(v, (str, int, float, bool)) for v in clean.values()):
+            skipped += 1
+            continue
         parsed.append(GameRecord.from_row(clean))
 
     imported = db.upsert_many(parsed, replace_all=replace_all)

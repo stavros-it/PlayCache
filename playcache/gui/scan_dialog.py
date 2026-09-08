@@ -119,6 +119,7 @@ class ScanDialog(QDialog):
         self._cataloger = cataloger
         self._config = config
         self._worker: ScanWorker | None = None
+        self._closing = False
 
         layout = QVBoxLayout(self)
 
@@ -298,7 +299,18 @@ class ScanDialog(QDialog):
         self.log_view.append(f"\nERROR: {message}")
         QMessageBox.critical(self, "Scan failed", message)
 
+    def reject(self) -> None:
+        """Route QDialog's built-in Escape / title-bar X through the close guard.
+
+        Without this override, ``reject()`` closes the dialog directly while a
+        scan is running, leaving a zombie ScanWorker (crash on app exit, and an
+        unguarded second scan becomes possible).
+        """
+        if not self._closing:
+            self._on_close()
+
     def _on_close(self) -> None:
+        self._closing = True
         if worker_is_running(self._worker):
             reply = QMessageBox.question(
                 self, "Cancel scan?",
@@ -306,6 +318,7 @@ class ScanDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
+                self._closing = False
                 return
             self._worker.cancel()
             # Give the worker time to wind down. If it's still inside a long
@@ -319,4 +332,4 @@ class ScanDialog(QDialog):
             else:
                 self._worker.deleteLater()
                 self._worker = None
-        self.reject()
+        super().reject()

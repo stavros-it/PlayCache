@@ -28,6 +28,7 @@ from .textutils import (
     clean_search_query,
     format_rating,
     join_names,
+    scrub_query,
     strip_html,
     truncate,
 )
@@ -108,14 +109,19 @@ class RAWGClient:
                 if 400 <= resp.status_code < 500:
                     raise RuntimeError(f"HTTP {resp.status_code} from RAWG")
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                if isinstance(data, dict):
+                    return data
+                raise RuntimeError("malformed API response")
             except (requests.RequestException, ValueError) as e:
                 last_exc = e
                 wait = min(2 ** attempt, 10)
                 log.warning("RAWG request error (%s), retry %d/%d in %ss",
-                            e, attempt, self.max_retries, wait)
+                            scrub_query(str(e)), attempt, self.max_retries, wait)
                 time.sleep(wait)
-        raise RuntimeError(f"RAWG request failed after {self.max_retries} retries: {last_exc}")
+        raise RuntimeError(
+            f"RAWG request failed after {self.max_retries} retries: {scrub_query(str(last_exc))}"
+        )
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -171,7 +177,8 @@ class RAWGClient:
                 record.fetch_message = ""
                 return record
             except (requests.RequestException, ValueError, RuntimeError) as e:
-                log.warning("RAWG fetch-by-id %s failed, falling back to search: %s", rawg_id, e)
+                log.warning("RAWG fetch-by-id %s failed, falling back to search: %s",
+                            rawg_id, scrub_query(str(e)))
 
         query = clean_search_query(record.game_name or record.folder_name)
         if not query:
@@ -183,7 +190,7 @@ class RAWGClient:
             results = self.search(query)
         except (requests.RequestException, ValueError, RuntimeError) as e:
             record.fetch_status = "error"
-            record.fetch_message = f"RAWG search error: {e}"
+            record.fetch_message = f"RAWG search error: {scrub_query(str(e))}"
             return record
 
         candidate = best_match(
@@ -199,7 +206,7 @@ class RAWGClient:
         try:
             detail = self.get_details(game_id) if valid_id else candidate
         except (requests.RequestException, ValueError, RuntimeError) as e:
-            log.warning("RAWG detail fetch failed for %s: %s", game_id, e)
+            log.warning("RAWG detail fetch failed for %s: %s", game_id, scrub_query(str(e)))
             detail = candidate
 
         self._apply(record, detail)
@@ -216,8 +223,8 @@ class RAWGClient:
         record.rawg_id = detail.get("id")
         record.rawg_slug = detail.get("slug")
         record.release_date = detail.get("released") or record.release_date
-        record.developer = join_names(detail.get("developers"))
-        record.publisher = join_names(detail.get("publishers"))
+        record.developer = join_names(detail.get("developers")) or record.developer
+        record.publisher = join_names(detail.get("publishers")) or record.publisher
         record.game_type = join_names(detail.get("genres")) or record.game_type
 
         mc = detail.get("metacritic")
@@ -231,7 +238,8 @@ class RAWGClient:
 
         # Description: prefer the plain-text raw description
         desc = detail.get("description_raw") or strip_html(detail.get("description"))
-        record.short_description = truncate(desc, self.desc_max)
+        if desc:
+            record.short_description = truncate(desc, self.desc_max)
 
         record.cover_url = detail.get("background_image") or record.cover_url
         record.website = detail.get("website") or record.website

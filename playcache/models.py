@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, fields
+from functools import cached_property
 from pathlib import Path
 
 _drive_label_cache: dict[str, str] = {}
 _mount_cache: list[tuple[str, str, str]] | None = None
 
 _INT_FIELDS = {"rawg_id", "thegamesdb_id", "metacritic_score"}
+
+_MOUNT_ESCAPE_RE = re.compile(r"\\([0-7]{3})")
+
+
+def _decode_mount_escapes(value: str) -> str:
+    return _MOUNT_ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 8)), value)
 
 
 def clear_volume_label_cache() -> None:
@@ -37,7 +45,7 @@ def _load_mounts() -> list[tuple[str, str, str]]:
                 parts = line.split()
                 if len(parts) >= 3:
                     dev, mp, fs = parts[0], parts[1], parts[2]
-                    mp = os.path.normpath(mp)
+                    mp = os.path.normpath(_decode_mount_escapes(mp))
                     mounts.append((dev, mp, fs))
         mounts.sort(key=lambda x: len(x[1]), reverse=True)
     except (OSError, UnicodeDecodeError):
@@ -46,21 +54,42 @@ def _load_mounts() -> list[tuple[str, str, str]]:
     return mounts
 
 
+def _mount_prefix_match(path: str, mount_point: str) -> bool:
+    if mount_point == "/":
+        return path == "/" or path.startswith("/")
+    return path == mount_point or path.startswith(mount_point + "/")
+
+
 def _linux_mount_for(path: str) -> str:
     """Return the mount point that contains ``path`` (e.g. ``/home`` or ``/``).
 
     Walks up the path tree until the device number (``st_dev``) changes,
-    which identifies the mount boundary. Falls back to the longest
+    which identifies the mount boundary. Paths that no longer exist fall
+    back to their deepest existing ancestor. Falls back to the longest
     mount-point-prefix from /proc/mounts.
     """
     resolved = os.path.realpath(path)
-    try:
-        target_dev = os.stat(resolved).st_dev
-    except OSError:
-        target_dev = 0
 
-    current = resolved
-    while current and current != os.sep:
+    start = resolved
+    start_dev: int | None = None
+    while start and start != "/":
+        try:
+            start_dev = os.stat(start).st_dev
+            break
+        except OSError:
+            parent = os.path.dirname(start)
+            if not parent or parent == start:
+                start = "/"
+                break
+            start = parent
+    if start_dev is None:
+        for _dev, mp, _fs in _load_mounts():
+            if _mount_prefix_match(resolved, mp):
+                return mp
+        return "/"
+
+    current = start
+    while current and current != "/":
         parent = os.path.dirname(current)
         if not parent or parent == current:
             break
@@ -68,15 +97,15 @@ def _linux_mount_for(path: str) -> str:
             parent_dev = os.stat(parent).st_dev
         except OSError:
             break
-        if parent_dev != target_dev:
+        if parent_dev != start_dev:
             return current
         current = parent
 
     for _dev, mp, _fs in _load_mounts():
-        if resolved == mp or resolved.startswith(mp + os.sep):
+        if _mount_prefix_match(current, mp):
             return mp
 
-    return current if current and current != os.sep else os.sep
+    return current if current and current != "/" else "/"
 
 
 def _linux_volume_label(mount_point: str) -> str:
@@ -172,7 +201,7 @@ class GameRecord:
     # These are preserved across rescans (API data won't overwrite them).
     manual_overrides: str = ""
 
-    @property
+    @cached_property
     def disk(self) -> str:
         """Display name of the disk/drive this game lives on.
 

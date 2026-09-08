@@ -24,13 +24,14 @@ from PySide6.QtWidgets import (
 )
 
 try:
-    from PySide6.QtGui import QPainter, QPixmap
+    from PySide6.QtGui import QColor, QPainter, QPixmap
     _HAS_QTGUI = True
 except ImportError:
     _HAS_QTGUI = False
 
 from playcache.gui.item_delegate import GamesItemDelegate
 from playcache.gui.table_model import COLUMNS, GamesTableModel
+from playcache.gui.theme import BG_WINDOW
 from playcache.models import GameRecord
 
 pytestmark = pytest.mark.skipif(not _HAS_QTGUI, reason="PySide6 QtGui unavailable (no OpenGL libs)")
@@ -152,3 +153,34 @@ def test_paint_selected_and_alternate_combinations(qapp):
                 delegate.paint(painter, _option(state, alternate=alt), index_source)
     finally:
         painter.end()
+
+
+@pytest.mark.filterwarnings("ignore")
+@pytest.mark.parametrize("cell_w", [2, 6, 11])
+def test_paint_status_cell_narrower_than_badge_padding_draws_nothing(qapp, cell_w):
+    """A Status cell narrower than 12px clamps the badge width to 0.
+
+    Regression: ``badge_w = min(rect.width() - 12, 90)`` had no lower bound,
+    so a tiny column produced a negative-width badge rect. The clamp must
+    keep paint() exception-free and leave only the background fill.
+    """
+    model = GamesTableModel([_sample_record(status="ok")])
+    delegate = GamesItemDelegate()
+    status_col = next(i for i, c in enumerate(COLUMNS) if c[0] == "Status")
+    index = model.index(0, status_col)
+
+    opt = _option()
+    opt.rect = QRect(0, 0, cell_w, 40)
+    pixmap = QPixmap(cell_w, 40)
+    pixmap.fill(QColor(BG_WINDOW))
+    painter = QPainter(pixmap)
+    try:
+        delegate.paint(painter, opt, index)
+    finally:
+        painter.end()
+
+    image = pixmap.toImage()
+    background = QColor(BG_WINDOW)
+    for x in range(image.width()):
+        for y in range(image.height()):
+            assert image.pixelColor(x, y) == background

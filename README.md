@@ -18,7 +18,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
-  <img src="https://img.shields.io/badge/tests-164-brightgreen" alt="Tests: 164">
+   <img src="https://img.shields.io/badge/tests-365-brightgreen" alt="Tests: 365">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
 </p>
 
@@ -31,15 +31,23 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
 ## Features
 
 ### Cataloguing
-- **Smart folder-name detection** — a 6-priority chain resolves the real game
-  name from messy folder names:
+- **Smart game-name detection** — authoritative metadata first, then weighted
+  evidence scoring over every remaining signal:
   1. Steam `appmanifest_*.acf` manifest (matched by `installdir`)
   2. GOG `goggame-*.info` JSON metadata (prefers base game over DLC)
   3. GOG setup executable filename
      (`setup_achilles_legends_untold_1.4.0.0_(74603).exe` → `Achilles Legends Untold`)
-  4. Cleaned folder name (strips `[srcgroup10]`, `v1.2`, `-srcgroup12`, `RePack by srcgroup1`)
-  5. Largest non-launcher `.exe` (CamelCase split, architecture suffix strip)
-  6. Cleaned folder name (final fallback)
+  4. Evidence scoring — installer filenames, PE VERSIONINFO evidence
+     (`ProductName` / `FileDescription` of the largest executables; rescues
+     bare `setup.exe` repacks and generic `game.exe` binaries), the cleaned
+     folder name (strips `[srcgroup10]`, `v1.2`, `-srcgroup12`, `RePack by srcgroup1`),
+     plain `.exe` stems, and the parent folder name are each scored as
+     `weight × title-quality`, with a bonus when two sources agree
+- **Game-archive scanning** — `.zip` / `.7z` / `.rar` / `.iso` files are
+  catalogued as games in their own right, with the title parsed from the
+  archive filename (URL prefixes, repack/source-group tokens, dotted versions,
+  and `(id)` tags stripped; multi-part RARs yield only the first volume;
+  nothing is extracted)
 - **Store detection** from path (Steam / GOG / Epic / Other)
 - **Disk conflict detection** — pauses and prompts the user when a game exists
   on a different disk (new / old / both)
@@ -105,7 +113,8 @@ python -m pip install -r requirements.txt
 
 # 2. Copy the config template and add your free RAWG key
 Copy-Item config.example.ini config.ini
-notepad config.ini        # paste your key under [thegamesdb] api_key =
+notepad config.ini        # paste your RAWG key under [rawg] api_key =
+                          # (optionally add a TheGamesDB key under [thegamesdb] too)
 
 # 3. Launch the GUI (opens maximized, sorted alphabetically)
 python run.pyw            # no console window; logs to playcache.log
@@ -120,7 +129,8 @@ python3 -m pip install -r requirements.txt
 
 # 2. Copy the config template and add your free RAWG key
 cp config.example.ini config.ini
-${EDITOR:-nano} config.ini   # paste your key under [thegamesdb] api_key =
+${EDITOR:-nano} config.ini   # paste your RAWG key under [rawg] api_key =
+                             # (optionally add a TheGamesDB key under [thegamesdb] too)
 
 # 3. Launch the GUI (opens maximized, sorted alphabetically)
 python3 run.pyw               # logs to playcache.log
@@ -243,7 +253,7 @@ with a clear "upgrade PlayCache" message.
 
 ```
 playcache/
-  __init__.py             # version = "1.0.0"
+  __init__.py             # __version__ — single source of truth for the version
   config.py               # loads config.ini / env vars (PLAYCACHE_*)
   models.py               # GameRecord dataclass + computed disk/release props
   db.py                   # SQLite schema, upsert, v_excel view, overrides, stats
@@ -269,7 +279,7 @@ playcache/
     duplicates_dialog.py  # fuzzy duplicate finder + resolver
 run.pyw                   # GUI entry point (no console, maximized)
 run.py                    # Console entry point (same app, maximized)
-tests/                    # pytest suite (164 tests)
+tests/                    # pytest suite (365 tests)
 ```
 
 ## Testing

@@ -1,6 +1,7 @@
 """Export the SQLite catalog to an .xlsx file matching the 6-column reference layout."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -63,9 +64,16 @@ def export_xlsx(db: Database, output_path: str) -> str:
 
     out = Path(output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(out.suffix + ".tmp")
     try:
-        wb.save(out)
+        wb.save(tmp)
+        os.replace(tmp, out)
     except OSError as e:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         errno = getattr(e, "errno", None)
         if errno in (13, 5, 21):
             raise PermissionError(

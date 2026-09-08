@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSpinBox,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -24,7 +24,14 @@ from ..db import Database
 from ..image_cache import ImageCache
 from ..models import GameRecord
 from .table_model import GamesTableModel
-from .theme import BG_INPUT, TEXT_MUTED
+from .theme import (
+    BG_INPUT,
+    TEXT_MUTED,
+    YOUTUBE_BG,
+    YOUTUBE_BG_DISABLED,
+    YOUTUBE_BG_HOVER,
+    YOUTUBE_TEXT_DISABLED,
+)
 
 log = logging.getLogger(__name__)
 
@@ -83,21 +90,22 @@ class DetailPanel(QWidget):
         # YouTube gameplay search button (below cover)
         self.youtube_btn = QPushButton("▶ Search YouTube Gameplay")
         self.youtube_btn.setStyleSheet(
-            "QPushButton { background-color: #FF0000; color: white; "
-            "border-radius: 4px; padding: 6px 12px; font-weight: bold; }"
-            "QPushButton:hover { background-color: #CC0000; }"
-            "QPushButton:disabled { background-color: #555; color: #999; }"
+            f"QPushButton {{ background-color: {YOUTUBE_BG}; color: white; "
+            f"border-radius: 4px; padding: 6px 12px; font-weight: bold; }} "
+            f"QPushButton:hover {{ background-color: {YOUTUBE_BG_HOVER}; }} "
+            f"QPushButton:disabled {{ background-color: {YOUTUBE_BG_DISABLED}; "
+            f"color: {YOUTUBE_TEXT_DISABLED}; }} "
         )
         self.youtube_btn.setEnabled(False)
         self.youtube_btn.clicked.connect(self._search_youtube)
         layout.addWidget(self.youtube_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Editable form
-        self._inputs: dict[str, QLineEdit | QTextEdit | QSpinBox] = {}
+        self._inputs: dict[str, QLineEdit | QPlainTextEdit | QSpinBox] = {}
         form = QFormLayout()
         for label, attr, kind in FIELDS:
             if kind == "longtext":
-                w = QTextEdit()
+                w = QPlainTextEdit()
                 w.setFixedHeight(72)
             elif kind == "number":
                 w = QSpinBox()
@@ -152,11 +160,11 @@ class DetailPanel(QWidget):
         self._record = record
         self._row = row
         if record is None:
-            self.cover_label.setText("No game selected")
             self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText("No game selected")
             self._current_url = ""
             for w in self._inputs.values():
-                if isinstance(w, QTextEdit):
+                if isinstance(w, QPlainTextEdit):
                     w.clear()
                 elif isinstance(w, QSpinBox):
                     w.setValue(0)
@@ -170,7 +178,7 @@ class DetailPanel(QWidget):
         self._set_enabled(True)
         for attr, w in self._inputs.items():
             value = getattr(record, attr, "")
-            if isinstance(w, QTextEdit):
+            if isinstance(w, QPlainTextEdit):
                 w.setPlainText(str(value or ""))
             elif isinstance(w, QSpinBox):
                 try:
@@ -189,17 +197,21 @@ class DetailPanel(QWidget):
         url = record.cover_url or ""
         self._current_url = url
         if url:
-            self.cover_label.setText("Loading…")
             self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText("Loading…")
             self._image_cache.request(url)
         else:
-            self.cover_label.setText("No cover")
             self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText("No cover")
 
     # ------------------------------------------------------------------ #
     def on_image_loaded(self, url: str, pixmap: QPixmap | None) -> None:
         """Slot connected to ImageCache.image_loaded."""
-        if url != self._current_url or pixmap is None:
+        if url != self._current_url:
+            return
+        if pixmap is None:
+            self.cover_label.setPixmap(QPixmap())
+            self.cover_label.setText("No cover")
             return
         scaled = pixmap.scaled(
             self.cover_label.size(),
@@ -214,7 +226,7 @@ class DetailPanel(QWidget):
             return
         changes: dict[str, str] = {}
         for attr, w in self._inputs.items():
-            if isinstance(w, QTextEdit):
+            if isinstance(w, QPlainTextEdit):
                 value = w.toPlainText()
             elif isinstance(w, QSpinBox):
                 value = str(w.value()) if w.value() != 0 else ""
@@ -247,8 +259,11 @@ class DetailPanel(QWidget):
 
         for attr in succeeded:
             setattr(self._record, attr, changes[attr])
-        if succeeded and self._row >= 0:
-            self._model.update_record(self._row, self._record)
+        if succeeded:
+            row = self._model.row_by_folder_path(self._record.folder_path)
+            self._row = row
+            if row >= 0:
+                self._model.update_record(row, self._record)
 
         if ok:
             QMessageBox.information(self, "Saved", f"Saved {len(succeeded)} field(s).")
@@ -265,8 +280,12 @@ class DetailPanel(QWidget):
             )
 
     def _open_website(self) -> None:
-        if self._record and self._record.website:
-            QDesktopServices.openUrl(self._record.website)
+        if self._record and self._web_url_is_safe(self._record.website):
+            QDesktopServices.openUrl(QUrl(self._record.website))
+
+    @staticmethod
+    def _web_url_is_safe(url: str | None) -> bool:
+        return bool(url) and url.lower().startswith(("http://", "https://"))
 
     def _search_youtube(self) -> None:
         """Open YouTube search for '<game name> gameplay' in the default browser."""
@@ -283,5 +302,6 @@ class DetailPanel(QWidget):
             w.setEnabled(enabled)
         self.save_btn.setEnabled(enabled)
         self.refetch_btn.setEnabled(enabled)
-        self.website_btn.setEnabled(enabled and bool(self._record and self._record.website))
+        website_safe = bool(self._record and self._web_url_is_safe(self._record.website))
+        self.website_btn.setEnabled(enabled and website_safe)
         self.youtube_btn.setEnabled(enabled and bool(self._record))

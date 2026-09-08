@@ -46,6 +46,13 @@ class GamesTableModel(QAbstractTableModel):
             return self._records[row]
         return None
 
+    def row_by_folder_path(self, folder_path: str) -> int:
+        """Return the source row holding ``folder_path``, or -1 if absent."""
+        for row, record in enumerate(self._records):
+            if record.folder_path == folder_path:
+                return row
+        return -1
+
     def update_record(self, row: int, record: GameRecord) -> None:
         if 0 <= row < len(self._records):
             self._records[row] = record

@@ -1,6 +1,7 @@
 """Settings dialog for API keys and scan parameters."""
 from __future__ import annotations
 
+import configparser
 import os
 from pathlib import Path
 
@@ -124,8 +125,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
     def _save(self) -> None:
-        new_rawg = self.rawg_key.text().strip() if self.rawg_key.isEnabled() else self._config.rawg_api_key
-        new_tgdb = self.tgdb_key.text().strip() if self.tgdb_key.isEnabled() else self._config.thegamesdb_api_key
+        new_rawg = None if self._rawg_from_env else self.rawg_key.text().strip()
+        new_tgdb = None if self._tgdb_from_env else self.tgdb_key.text().strip()
         new_delay = self.delay.value()
         new_timeout = self.timeout.value()
         new_retries = self.retries.value()
@@ -133,15 +134,16 @@ class SettingsDialog(QDialog):
         new_desc_max = self.desc_max.value()
 
         try:
-            from configparser import ConfigParser
-            parser = ConfigParser()
+            parser = configparser.ConfigParser()
             if self._config_path.is_file():
                 parser.read(self._config_path, encoding="utf-8-sig")
             for section in ("rawg", "thegamesdb", "catalog"):
                 if not parser.has_section(section):
                     parser.add_section(section)
-            parser.set("rawg", "api_key", new_rawg)
-            parser.set("thegamesdb", "api_key", new_tgdb)
+            if new_rawg is not None:
+                parser.set("rawg", "api_key", new_rawg)
+            if new_tgdb is not None:
+                parser.set("thegamesdb", "api_key", new_tgdb)
             parser.set("catalog", "request_delay", str(new_delay))
             parser.set("catalog", "request_timeout", str(new_timeout))
             parser.set("catalog", "max_retries", str(new_retries))
@@ -165,11 +167,13 @@ class SettingsDialog(QDialog):
                     except OSError:
                         pass
                 raise
-        except OSError as e:
+        except (OSError, configparser.Error) as e:
             QMessageBox.warning(self, "Could not save settings", str(e))
             return
-        self._config.rawg_api_key = new_rawg
-        self._config.thegamesdb_api_key = new_tgdb
+        if new_rawg is not None:
+            self._config.rawg_api_key = new_rawg
+        if new_tgdb is not None:
+            self._config.thegamesdb_api_key = new_tgdb
         self._config.request_delay = new_delay
         self._config.request_timeout = new_timeout
         self._config.max_retries = new_retries

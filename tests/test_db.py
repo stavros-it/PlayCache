@@ -1,7 +1,10 @@
 """Tests for the SQLite database layer (no network)."""
 import os
+import sqlite3
 import sys
 from pathlib import Path
+
+import pytest
 
 from playcache.db import Database
 from playcache.models import GameRecord
@@ -103,18 +106,52 @@ def test_upsert_many_empty_list_without_replace_all(tmp_path):
 
 
 def test_upsert_many_is_atomic_on_failure(tmp_path):
-    """If one record fails (e.g. NOT NULL violation), none should be committed."""
+    """If one record fails (NOT NULL violation), nothing should be committed."""
     db = Database(str(tmp_path / "test.db"))
     good = _sample_record(folder_path="/games/good")
-    bad = _sample_record(folder_path="/games/bad")
-    # Corrupt the record by removing a required field via __dict__ manipulation
-    # — easier: just pass a duplicate folder_path which ON CONFLICT handles,
-    # so to truly test atomicity we use a record that violates a constraint.
-    # Since the schema only enforces NOT NULL on folder_path, and our dataclass
-    # always provides it, we skip this test if we can't easily force a failure.
-    n = db.upsert_many([good, bad])
-    assert n == 2
-    assert db.count() == 2
+    bad = _sample_record(folder_path=None)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.upsert_many([good, bad])
+    assert db.count() == 0
+
+
+def test_upsert_many_replace_all_atomic_on_failure(tmp_path):
+    """A failed replace-all batch must leave the existing catalog intact."""
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample_record(folder_path="/games/old"))
+    bad = _sample_record(folder_path=None)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.upsert_many([bad], replace_all=True)
+    assert db.count() == 1
+    assert db.get_by_path("/games/old") is not None
+
+
+def test_excel_view_orders_case_insensitively(tmp_path):
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample_record(folder_path="/games/1", game_name="Zelda"))
+    db.upsert(_sample_record(folder_path="/games/2", game_name="apple"))
+    names = [r["GAME NAME"] for r in db.list_excel_view()]
+    assert names == ["apple", "Zelda"]
+
+
+def test_excel_view_recreated_on_reinit(tmp_path):
+    """A pre-existing DB with a stale v_excel definition gets the new view."""
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert(_sample_record(folder_path="/games/A", game_name="Alpha"))
+    conn = sqlite3.connect(db.db_path)
+    conn.execute("DROP VIEW v_excel;")
+    conn.execute('CREATE VIEW v_excel AS SELECT game_name AS "GAME NAME" FROM games;')
+    conn.commit()
+    conn.close()
+
+    db.init()
+    rows = db.list_excel_view()
+    assert len(rows) == 1
+    assert list(rows[0].keys()) == [
+        "GAME NAME", "PLATFORM", "GOG / STEAM", "USER RATING",
+        "GAME TYPE", "SHORT DESCRIPTION",
+    ]
+    assert rows[0]["GAME NAME"] == "Alpha"
 
 
 def test_excel_view(tmp_path):

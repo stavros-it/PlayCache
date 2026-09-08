@@ -6,7 +6,7 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.5.0)
+## Current state (v1.5.1)
 
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
 - ✅ Folder scanning with library-root descent, smart name detection, store detection
@@ -100,6 +100,22 @@
   both; disc-dump tags `(USA)/(Europe)/(Rev 2)/(En,Fr,…)` stripped; GOG
   setup `1.0d`/`v2` version tags and `_v1.0.4-srcgroup19`-style noise
   handled. 231 tests passing, ruff clean.
+- ✅ Second full-codebase audit (2026-09-08) — ~60 findings fixed across all
+  layers: scan cancel no longer corrupts rows or writes during dry-runs;
+  conflict prompts fire only for genuinely new duplicate paths (not on every
+  rescan); rescans re-bind stored RAWG/TGDB IDs and user-corrected names;
+  API keys are scrubbed from error messages and logs; TGDB quota updates even
+  on 403 bodies; Escape/X during a scan routes through the cancel guard;
+  games deleted during a refetch are no longer resurrected and edits made
+  during a refetch are no longer reverted; env-var API keys never leak into
+  config.ini; xlsx/backup writes are atomic; v_excel orders
+  case-insensitively; Linux disk grouping fixed for deleted paths, root
+  mounts, and mounts with spaces; non-ASCII (Greek/CJK) folder and archive
+  names are preserved; GOG installer parsing keeps title numbers ("Fifa 19");
+  the settings-configurable skip_folders option is actually wired; hardcoded
+  colors centralized in theme.py; vacuous atomicity tests replaced with
+  failure-capable ones; release builds gated on tests. 365 tests passing
+  (364 + 1 platform-gated skip), ruff clean.
 
 ## Priorities
 
@@ -276,6 +292,98 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-08 — Second full-codebase audit: cancel-safety, secret hygiene, GUI lifecycle
+
+**Trigger**: user requested a second full code audit with all bugs fixed and
+conservative improvements applied. Six parallel read-only audit agents
+(scanner, data layer, API/cataloger, GUI core, GUI dialogs, infra/tests)
+produced ~60 verified findings (several reproduced with headless-Qt scripts);
+fixes were implemented in module-scoped waves and the whole diff passed a
+final review. Version bumped 1.5.0 → 1.5.1.
+
+**Highest-impact fixes**:
+- **Scan cancellation** (cataloger): the per-game `except Exception` swallowed
+  the `InterruptedError` cancellation sentinel raised by the progress callback
+  — a cancelled scan upserted the in-flight game as "error" (corrupting a
+  freshly stored ok row, defeating a conflict "keep old" choice, and writing
+  rows during a cancelled dry-run). `except InterruptedError: raise` now
+  precedes the generic handler.
+- **Conflict prompts** (cataloger): the same-name-different-disk check ran
+  before the already-catalogued skip, re-prompting the same pair on every scan
+  and doing a full-table load per folder. Skip first; conflicts fire only for
+  genuinely new folder paths.
+- **Rescan re-binding** (cataloger): rescans searched by the folder-derived
+  name with no stored IDs, silently able to bind a different edition.
+  Existing rows now seed rawg_id/thegamesdb_id/game_name and the fetch
+  receives the overrides.
+- **API key hygiene** (clients): ConnectionError/Timeout messages embed the
+  full request URL including `key=...`; those strings flowed into
+  fetch_message (DB, tooltips, .json.gz backups) and logs. A shared
+  `textutils.scrub_query()` now strips query strings and key params anywhere
+  an exception is stringified.
+- **Scan-dialog close guard** (scan_dialog): Escape and title-bar X bypassed
+  `_on_close` entirely (only the Close button was wired), leaving a zombie
+  ScanWorker that qFatal-crashed the app at exit and allowed a second
+  concurrent scan. `reject()` now routes through `_on_close` with a
+  re-entrancy flag.
+- **Refetch races** (main_window): the worker resurrected games deleted
+  mid-run and reverted edits + overrides made mid-run; it now skips records
+  that vanished and re-reads overrides immediately before the upsert.
+  Add Game / Scan Drive gained the shared busy guard.
+- **QuotaWorker lifecycle** (main_window): the startup TGDB fetch had none of
+  the finished→deleteLater/cleanup wiring — closing during a slow fetch froze
+  the UI 5s then qFatal'd at shutdown. It now matches the other workers, with
+  closeEvent escalation and a Settings busy-guard.
+- **Settings env-key leak** (settings_dialog): an env-sourced API key was
+  written into config.ini on Save (destroying the ini's own key). Env-sourced
+  keys are now never persisted.
+- **Unicode names** (folder_scanner): non-ASCII folders were renamed to their
+  parent directory and non-ASCII archives silently dropped. Name gates accept
+  any Unicode letter; token filters any Unicode alphanumeric. Also: GOG
+  version parsing no longer eats title numbers ("Fifa 19", "Duke Nukem 3d"),
+  malformed goggame-*.info no longer aborts a whole scan, the settings
+  `skip_folders` option is actually passed to the scanner, store patterns
+  no longer mislabel games named "Legendary"/"Heroic", bare "D:" scans the
+  drive root, and Steam manifests are re-read on every scan.
+- **Data layer**: v_excel orders case-insensitively and is recreated on init
+  (stale view definitions no longer persist); backup import skips rows with
+  non-scalar column values (previously an uncaught ProgrammingError — Restore
+  failed silently) and raises TypeError the GUI now catches; export fsyncs
+  after gzip close; xlsx export is atomic (tmp + os.replace); Linux disk
+  grouping fixed for deleted paths, root mounts, `\040` escapes, and mounts
+  with spaces; `disk` is computed once per record (cached_property).
+- **GUI polish fixes**: detail-panel Save re-resolves the source row by
+  folder_path (stale-row corruption after a model reset), QPlainTextEdit for
+  descriptions (Ctrl+B/I no longer hijacked), Open Website restricted to
+  http(s), "No cover" on fetch failure, stats grid overlap with even section
+  counts, store filter populated from live data, restore refreshes the
+  status bar, badge width clamped, all hardcoded hex centralized in theme.py.
+- **Infra**: pyproject/issue-template URLs pointed at a 404 account
+  (StavrosAntoniou → stavros-it), README quick start now says `[rawg]`,
+  .desktop Exec quoting for paths with spaces, UPX off (Qt DLL hazard),
+  release builds gated on tests, CI tool pins, tests/conftest.py offscreen
+  scaffolding, entry-point smoke test, image-cache regression tests, and the
+  two vacuous atomicity tests replaced with failure-capable ones.
+
+**Tests**: 231 → 365 (364 passing + 1 platform-gated skip). New suites cover
+the real API clients (retry/Retry-After/quota/malformed bodies/key
+scrubbing), conflict resolution (new/old/both + override migration + no
+re-prompt), cataloger behavior (cancel, only_missing, provider, rescan
+seeding), the scan-dialog reject path, settings env-key no-write, stats grid
+layout, detail-panel save re-resolution, Linux mount helpers, atomic
+export/import failure paths, and the entry points.
+
+**Trade-offs / deferred** (documented, not done): the TGDB client instance is
+still shared between the startup quota fetch and a scan started in the first
+seconds after launch (window is seconds; worst case a duplicate /Genres
+fetch); conflict "new" doesn't seed IDs from the replaced twin row;
+`_squash` vs `_norm_key` normalization unification (match-behavior risk);
+grapheme-cluster-safe truncate (cosmetic); `create_shortcut.bat` still
+duplicates `scripts/make_shortcut.py`; the image cache remains unbounded.
+Process note: the folder_scanner and data-layer fix waves were implemented by
+the controller after repeated empty subagent returns; their output passed the
+same scoped tests, the full suite, and the final review as the subagent waves.
 
 ### 2026-09-04 — Detection hardening from a real game drive (I:)
 

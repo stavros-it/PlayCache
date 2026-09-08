@@ -4,6 +4,7 @@ from playcache.textutils import (
     clean_search_query,
     format_rating,
     join_names,
+    scrub_query,
     similarity,
     strip_html,
     truncate,
@@ -130,6 +131,14 @@ class TestCleanSearchQuery:
     def test_strips_colon_subtitle(self):
         assert clean_search_query("Hollow Knight: Voidheart Edition") == "Hollow Knight"
 
+    def test_unspaced_colon_survives(self):
+        assert clean_search_query("Re:Legend") == "Re:Legend"
+        assert clean_search_query("SomeGame:NoSpaces") == "SomeGame:NoSpaces"
+
+    def test_colon_with_space_after_strips(self):
+        assert clean_search_query("NieR: Automata") == "NieR"
+        assert clean_search_query("DmC: Devil May Cry") == "DmC"
+
     def test_strips_spaced_hyphen_subtitle(self):
         assert clean_search_query("Some Game - subtitle") == "Some Game"
 
@@ -144,3 +153,41 @@ class TestCleanSearchQuery:
 
     def test_preserves_year_in_title(self):
         assert clean_search_query("Cyberpunk 2077") == "Cyberpunk 2077"
+
+
+class TestScrubQuery:
+    def test_strips_url_query_string(self):
+        assert (
+            scrub_query("GET /api/games?search=Hollow+Knight&key=SECRET HTTP/1.1")
+            == "GET /api/games HTTP/1.1"
+        )
+
+    def test_strips_query_string_to_end_of_text(self):
+        assert (
+            scrub_query("Max retries exceeded with url: /api/games?search=X&key=S3CR3T")
+            == "Max retries exceeded with url: /api/games"
+        )
+
+    def test_redacts_key_value(self):
+        assert scrub_query("failed with key=SECRET in params") == "failed with key=<redacted> in params"
+
+    def test_redacts_apikey_value(self):
+        assert scrub_query("apikey=SECRET") == "apikey=<redacted>"
+
+    def test_redacts_token_value(self):
+        assert scrub_query("token=abc123&other=1") == "token=<redacted>&other=1"
+
+    def test_plain_text_unchanged(self):
+        assert scrub_query("nothing to see here") == "nothing to see here"
+
+    def test_empty(self):
+        assert scrub_query("") == ""
+
+    def test_no_leak_in_connection_error_shape(self):
+        msg = (
+            "HTTPSConnectionPool(host='api.rawg.io', port=443): Max retries exceeded "
+            "with url: /api/games?search=Hollow+Knight&key=SUPERSECRET123 (Caused by None)"
+        )
+        scrubbed = scrub_query(msg)
+        assert "SUPERSECRET123" not in scrubbed
+        assert "?search" not in scrubbed
