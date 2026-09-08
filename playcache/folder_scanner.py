@@ -149,6 +149,8 @@ _ALLCAPS_SPLIT = re.compile(r"([A-Z]{2,})([A-Z][a-z])")
 # Archive extensions are included so archived GOG installers parse too.
 _GOG_SETUP_RE = re.compile(r"^setup_(.+)\.(?:exe|sh|bin|zip|7z|rar|iso)$", re.IGNORECASE)
 
+_GOG_LINUX_RE = re.compile(r"^gog_(.+)\.sh$", re.IGNORECASE)
+
 # Tokens that are noise in GOG setup exe filenames
 _GOG_SETUP_NOISE = {
     "gog", "steam", "epic", "dlc", "multi", "multi5", "multi7", "multi9",
@@ -160,6 +162,15 @@ _GOG_SETUP_NOISE = {
 
 # Subdirs that never contain the game executable
 _SKIP_SUBDIRS = {"data", "cache", "logs", "temp", "__pycache__", ".git"}
+
+# Subdirs that mark a folder as a single game's content tree rather than a
+# grouping folder full of games (used by the grouping-folder heuristic).
+_SUPPORT_SUBDIRS = _SKIP_SUBDIRS | {
+    "bin", "binaries", "win32", "win64", "x64", "x86", "redist", "support",
+    "docs", "doc", "manual", "readme", "save", "saves", "bonus", "extras",
+    "dlc", "editor", "tools", "movies", "videos", "music", "soundtrack",
+    "characters", "expansions", "campaign", "campaigns", "patches",
+}
 
 # Installer filename markers: an executable whose name carries one of these
 # tokens (separated, or as a CamelCase suffix like "DoomEternalSetup") embeds
@@ -267,7 +278,9 @@ def _is_container(name: str) -> bool:
     n = name.lower().strip()
     if n in CONTAINER_NAMES:
         return True
-    return "steamlibrary" in n or n.startswith("steam library")
+    if "steamlibrary" in n or n.startswith("steam library"):
+        return True
+    return n.endswith(("gog games", "epic games", "origin games", "ubisoft games"))
 
 
 def _list_dirs(path: Path, _visited: set[str] | None = None) -> list[Path]:
@@ -356,6 +369,7 @@ def scan_games(
             continue
         yield from _resolve(child, skip, recursive=recursive, _visited=visited)
     yield from _archive_entries(root_path)
+    yield from _installer_entries(root_path)
 
 
 def _resolve(
@@ -384,6 +398,16 @@ def _resolve(
 
     if _is_container(path.name):
         yield from _archive_entries(path)
+        yield from _installer_entries(path)
+        for child in _list_dirs(path, _visited):
+            if _should_skip(child.name) or child.name.lower() in skip:
+                continue
+            yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
+        return
+
+    if _is_grouping_folder(path):
+        yield from _archive_entries(path)
+        yield from _installer_entries(path)
         for child in _list_dirs(path, _visited):
             if _should_skip(child.name) or child.name.lower() in skip:
                 continue
@@ -490,12 +514,16 @@ def _clean_gog_setup_name(filename: str) -> str:
     body = m.group(1)
     tokens = body.split("_")
     kept = []
-    for t in tokens:
+    for i, t in enumerate(tokens):
         if not t or not any(ch.isalnum() for ch in t):
             continue
         low = t.lower().strip("()")
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
         # Skip ID patterns: (90803), multi-volume (88455)-1
         if re.match(r"^\(\d+\)(?:-\d+)?$", t):
+            continue
+        # Skip build IDs directly preceding the (id) token: ..._79495_(69303)
+        if len(t) >= 5 and t.isdigit() and re.match(r"^\(\d+\)(?:-\d+)?$", nxt):
             continue
         # Skip version patterns: 1.4.0.0, 1.03.1628077, 1.0d, v2
         if re.match(r"^(?:v\d+(?:\.\d+)*[a-z]?|\d+(?:\.\d+)+[a-z]?)$", t, re.IGNORECASE):
@@ -933,6 +961,140 @@ def _archive_entries(folder: Path) -> list[ScannedFolder]:
             )
         )
     return entries
+
+
+# =====================================================================
+# Loose GOG installers (setup_*.exe / gog_*.sh / *.sh) as game entries
+# =====================================================================
+
+_SH_TRAILING_RE = re.compile(r"^v?\d+(\.\d+)*[a-z]?$", re.IGNORECASE)
+_SH_TRAILING_NOISE = {
+    "linux", "win", "windows", "hf", "hotfix", "en", "de", "fr", "es", "it",
+    "pt", "ru", "pl", "cs", "hu", "jp", "cn", "kr", "mx", "gog", "x64",
+    "x86", "64bit", "32bit", "update", "patch", "fix", "build",
+}
+
+
+def _clean_gog_linux_name(filename: str) -> str:
+    """Extract the game name from a GOG Linux installer (``gog_<name>_<ver>.sh``)."""
+    m = _GOG_LINUX_RE.match(filename)
+    if not m:
+        return ""
+    tokens = m.group(1).split("_")
+    kept = []
+    for i, t in enumerate(tokens):
+        if not t or not any(ch.isalnum() for ch in t):
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""
+        if re.match(r"^\(\d+\)(?:-\d+)?$", t):
+            continue
+        if len(t) >= 5 and t.isdigit() and re.match(r"^\(\d+\)(?:-\d+)?$", nxt):
+            continue
+        if re.match(r"^(?:v\d+(?:\.\d+)*[a-z]?|\d+(?:\.\d+)+[a-z]?)$", t, re.IGNORECASE):
+            continue
+        if t.lower().strip("()") in _GOG_SETUP_NOISE:
+            continue
+        kept.append(t)
+    return capwords(" ".join(kept))
+
+
+def _clean_generic_sh_name(filename: str) -> str:
+    stem = re.sub(r"\.sh$", "", filename, flags=re.IGNORECASE)
+    if stem.lower() in _NON_GAME_SCRIPTS or stem.lower() in _ARCHIVE_JUNK_NAMES:
+        return ""
+    tokens = stem.split("_")
+    while tokens:
+        low = tokens[-1].lower()
+        if _SH_TRAILING_RE.match(low) or low in _SH_TRAILING_NOISE:
+            tokens.pop()
+        else:
+            break
+    kept = [t for t in tokens if any(ch.isalnum() for ch in t)]
+    if not kept:
+        return ""
+    return capwords(" ".join(kept))
+
+
+def _is_installer_name(filename: str) -> bool:
+    stem = re.sub(r"\.(exe|sh|bin|appimage)$", "", filename, flags=re.IGNORECASE)
+    if stem.lower().startswith(("setup_", "gog_", "patch_", "update_")):
+        return True
+    return _looks_like_installer(filename)
+
+
+def _has_game_binary_top(path: Path) -> bool:
+    try:
+        children = [c for c in path.iterdir() if c.is_file() and not _is_hidden(c)]
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot list %s: %s", path, e)
+        return True
+    for c in children:
+        if re.match(r"goggame-\d+\.info$", c.name, re.IGNORECASE):
+            return True
+        if _is_game_binary_file(c) and not _is_installer_name(c.name):
+            return True
+    return False
+
+
+def _installer_entries(folder: Path) -> list[ScannedFolder]:
+    """ScannedFolder entries for loose GOG installer files in the folder."""
+    entries: list[ScannedFolder] = []
+    seen: set[str] = set()
+    try:
+        children = [c for c in folder.iterdir() if c.is_file() and not _is_hidden(c)]
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot list %s for installers: %s", folder, e)
+        return []
+    for c in sorted(children, key=lambda p: p.name.lower()):
+        name = ""
+        if _GOG_SETUP_RE.match(c.name):
+            name = _clean_gog_setup_name(c.name)
+        elif _GOG_LINUX_RE.match(c.name):
+            name = _clean_gog_linux_name(c.name)
+        elif c.suffix.lower() == ".sh":
+            name = _clean_generic_sh_name(c.name)
+        if not name or not _looks_like_game_name(name) or _title_quality(name) <= 0:
+            continue
+        key = _norm_key(name)
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(
+            ScannedFolder(
+                folder_name=c.name,
+                folder_path=str(c.resolve()),
+                cleaned_name=name,
+                platform=detect_platform(str(c)),
+                store=detect_store(str(c)),
+                is_library_root=False,
+            )
+        )
+    return entries
+
+
+def _is_grouping_folder(path: Path) -> bool:
+    """True when a folder is a bucket of games, not a single game itself.
+
+    Signals: at least one non-support subfolder, no game binary or GOG
+    metadata among its direct files, and either no files at all (two or
+    more non-support subfolders) or loose installer files that parse to
+    two or more distinct game names.
+    """
+    try:
+        entries = list(path.iterdir())
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot list %s: %s", path, e)
+        return False
+    files = [e for e in entries if e.is_file() and not _is_hidden(e)]
+    dirs = [e for e in entries if e.is_dir() and not _is_hidden(e)]
+    non_support = [d for d in dirs if d.name.lower() not in _SUPPORT_SUBDIRS]
+    if not non_support:
+        return False
+    if _has_game_binary_top(path):
+        return False
+    if not files:
+        return len(non_support) >= 2
+    return len({_norm_key(e.cleaned_name) for e in _installer_entries(path)}) >= 2
 
 
 def _title_quality(name: str) -> float:

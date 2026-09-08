@@ -6,7 +6,7 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.5.1)
+## Current state (v1.6.0)
 
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
 - ✅ Folder scanning with library-root descent, smart name detection, store detection
@@ -116,6 +116,16 @@
   colors centralized in theme.py; vacuous atomicity tests replaced with
   failure-capable ones; release builds gated on tests. 365 tests passing
   (364 + 1 platform-gated skip), ruff clean.
+- ✅ Grouping-folder descent + loose GOG installers as entries (2026-09-08) —
+  real-disk fix from `I:\1-GOG Games`: genre-bucket folders that mix game
+  subfolders with loose `setup_*.exe`/`gog_*.sh` files now descend at any
+  nesting depth (unconditionally — no more one junk row per bucket named
+  after a random installer), numbered library roots like `1-GOG Games` are
+  recognized as containers by suffix, and loose installer files are
+  catalogued as game entries like archives are. A full scan of the real
+  folder went from 13 detected rows to 162 (every game subfolder and every
+  installer file). 376 tests passing (375 + 1 platform-gated skip), ruff
+  clean. Version bumped to 1.6.0.
 
 ## Priorities
 
@@ -292,6 +302,63 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-08 — Grouping-folder descent + loose GOG installers as entries
+
+**Trigger**: the user reported that a scan of `I:\1-GOG Games` missed most of
+their games. Reproduction against the real disk showed 13 detected rows for a
+library of ~160: genre-bucket folders (`1-ARCADE/`, `1-RPG/`, …) each mix game
+subfolders with loose `setup_*.exe` download files, and the recursive descent
+rule only descended into folders with **no files at all** — so every bucket
+with a file inside collapsed into ONE junk row named after a random installer
+(e.g. `1-ARCADE` → "Sfa2"), even with the "descend into grouping folders"
+checkbox checked. Loose installers were also never catalogued (only archives
+are), and `1-GOG Games` wasn't recognized as a container (exact-name match).
+
+**Changes** (`folder_scanner.py`):
+- **Grouping-folder classification** (`_is_grouping_folder`): a folder is a
+  bucket of games when it has ≥1 non-support subfolder, no game binary or
+  GOG metadata among its direct files, and either no files (then ≥2
+  non-support subfolders) or **≥2 distinct installer game names** among its
+  files. Grouping folders descend unconditionally at any nesting depth and
+  never yield a row for themselves. The "distinct names" signal is what
+  separates a bucket (`1-ARCADE`: 20 unrelated installers) from a game
+  bundle kept whole (`Dead Cells Linux/`: setup + `Bonus/` + `DLC/` — one
+  name; `Talisman GOG/`: setup + patches + support dirs — one name).
+- **Loose installers as entries** (`_installer_entries`): `setup_*.{exe,sh,bin}`
+  files parse via the existing GOG setup parser (multi-volume `-N.bin` files
+  dedupe to one entry; a 5+ digit build ID directly before the `(id)` token is
+  stripped — shorter pure numbers are title numbers, cf. "Metal Slug 4"),
+  `gog_*.sh` via the same token rules, and other `*.sh` via a conservative
+  trailing version/build/noise stripper (`rogue_legacy_en_1_4_0_22617.sh` →
+  "Rogue Legacy"; launcher scripts like `start.sh` are excluded). Yielded at
+  the scan root, inside containers, and inside grouping folders — mirroring
+  the archive-entry feature.
+- **Container suffix matching** (`_is_container`): names ending in
+  "gog games"/"epic games"/"origin games"/"ubisoft games" are containers, so
+  `1-GOG Games` descends even when scanned from the drive root.
+- **Support-subdir set** (`_SUPPORT_SUBDIRS`): bin/data/DLC/bonus/characters/
+  expansions etc. don't count toward the grouping signal, protecting game
+  bundles from misclassification.
+
+**Verification**: reproduced first (scanner output vs. real directory
+listing), TDD with 11 new tests (nested grouping, bundle-not-descended
+shapes, container suffix, root installers, gog/generic .sh parsing, build-ID
+strip, multivolume dedupe), then re-scanned the real folder: 13 → 162 rows —
+every game subfolder and every installer file detected. Full suite 376
+collected (375 passing + 1 platform-gated skip), ruff clean.
+
+**Trade-offs**: a folder row and an installer row for the same game both
+appear (e.g. Torchlight 2 as folder + as `.sh`) — the post-scan exact-name
+purge keeps the most complete copy, same as the documented archive-vs-installed
+behavior. Installer-derived names inherit the pre-existing parser conventions
+(some carry `(64bit)` tags or build suffixes like "Gog-3"); fuzzy matching
+plus manual overrides cover them. The trailing `.sh` stripper eats pure-number
+title tokens that sit at the very END of an oddly-renamed installer filename
+(GOG's own `gog_*` naming keeps them — `gog_metal_slug_2_…` → "Metal Slug 2");
+a hypothetical `setup_final_fantasy_7_(id).exe` keeps "7" because the
+build-ID strip requires ≥5 digits. `create_shortcut.bat` and other deferred
+items remain unchanged.
 
 ### 2026-09-08 — Second full-codebase audit: cancel-safety, secret hygiene, GUI lifecycle
 

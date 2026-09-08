@@ -73,7 +73,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 365 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 376 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -101,7 +101,7 @@ Game DB/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.5.1"
+│   ├── __init__.py             # version = "1.6.0"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
@@ -133,7 +133,7 @@ Game DB/
 └── tests/                     # pytest suite
     ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture
     ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
-    ├── test_folder_scanner.py        # 130 tests (smart detection + archives + unicode + store patterns)
+    ├── test_folder_scanner.py        # 141 tests (smart detection + archives + installers + grouping descent)
     ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_cataloger_behavior.py    # 10 tests (cancel sentinel, only_missing, provider, rescan seeding)
@@ -156,7 +156,7 @@ Game DB/
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~6,460 LOC source + ~4,250 LOC tests = ~10,710 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~6,600 LOC source + ~4,340 LOC tests = ~10,940 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -367,7 +367,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 364 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 375 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
@@ -425,6 +425,28 @@ git push --tags
 
 ## 9. Known limitations & gotchas
 
+- **Grouping-folder descent + loose installers (2026-09-08, v1.6.0)** — real
+  libraries organize games into genre buckets (`1-ARCADE/`, `1-RPG/`, …) that
+  mix game subfolders with loose `setup_*.exe` / `gog_*.sh` download files.
+  The scanner now:
+  - recognizes library containers by SUFFIX too (`"1-GOG Games"` ends with
+    `"gog games"` → container), so numbered prefixes don't hide the library;
+  - classifies a folder as a **grouping folder** (`_is_grouping_folder`) when
+    it has ≥1 non-support subfolder, no game binary/GOG metadata among its
+    direct files, and either no files (≥2 non-support subfolders) or ≥2
+    distinct installer game names — grouping folders descend UNCONDITIONALLY
+    (any nesting depth) and never yield a row for themselves;
+  - yields loose GOG installer files as game entries
+    (`_installer_entries`): `setup_*.{exe,sh,bin}` via the setup parser
+    (multi-volume `-N.bin` deduped by name; 5+ digit build IDs directly before
+    the `(id)` token are stripped — shorter pure numbers are title numbers
+    like "Metal Slug 4"), `gog_*.sh` via the same token rules, and other
+    `*.sh` via a conservative trailing version/build/noise stripper
+    (`rogue_legacy_en_1_4_0_22617.sh` → "Rogue Legacy").
+  A game bundle folder (installer + `Bonus/`/`DLC/` support subdirs, ONE
+  distinct installer name) is NOT a grouping folder — it stays a single game
+  row. Same game via folder AND installer yields two rows; the post-scan
+  exact-name purge keeps the most complete copy.
 - **Second code audit pass (2026-09-08)** — ~60 findings fixed (see the
   ROADMAP decision log for the full list). New invariants to preserve:
   - Scan cancellation propagates: `except InterruptedError: raise` sits BEFORE

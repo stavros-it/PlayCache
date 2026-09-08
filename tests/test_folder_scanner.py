@@ -901,3 +901,103 @@ class TestParentFallbackGate:
         folder.mkdir(parents=True)
         result = smart_detect_game_name(folder, clean_folder_name(folder.name))
         assert result == "Hollow Knight"
+
+
+class TestGroupingFolderDescent:
+    def test_grouping_folder_with_installers_descends(self, tmp_path):
+        grouping = tmp_path / "1-ARCADE"
+        grouping.mkdir()
+        (grouping / "Tetris Forever").mkdir()
+        (grouping / "setup_mortal_kombat_2_2.0.0.2.exe").write_text("x")
+        (grouping / "setup_pinball_dreams_2.1.0.20.exe").write_text("x")
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == ["Mortal Kombat 2", "Pinball Dreams", "Tetris Forever"]
+
+    def test_grouping_descends_without_recursive_flag(self, tmp_path):
+        holder = tmp_path / "1-MY"
+        holder.mkdir()
+        (holder / "Torchlight 2").mkdir()
+        (holder / "Talisman").mkdir()
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == ["Talisman", "Torchlight 2"]
+
+    def test_nested_grouping_folders(self, tmp_path):
+        outer = tmp_path / "1-GOG"
+        outer.mkdir()
+        inner = outer / "1-INDIE"
+        inner.mkdir()
+        (inner / "Hollow Knight Silksong").mkdir()
+        (inner / "setup_hollow_knight_1.5_(50885).exe").write_text("x")
+        (inner / "setup_steamworld_dig_2.1.0.3.exe").write_text("x")
+        (outer / "Biomutant").mkdir()
+        (outer / "setup_aquanox_1.18_(19599).exe").write_text("x")
+        (outer / "setup_gex_2.0.0.5.exe").write_text("x")
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == [
+            "Aquanox", "Biomutant", "Gex", "Hollow Knight",
+            "Hollow Knight Silksong", "Steamworld Dig",
+        ]
+
+    def test_game_bundle_with_subdirs_not_descended(self, tmp_path):
+        bundle = tmp_path / "Dead Cells Linux"
+        bundle.mkdir()
+        (bundle / "Bonus").mkdir()
+        (bundle / "DLC").mkdir()
+        (bundle / "setup_dead_cells_1.26_(75679).exe").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Dead Cells"
+
+    def test_game_bundle_with_patches_not_descended(self, tmp_path):
+        bundle = tmp_path / "Talisman GOG"
+        bundle.mkdir()
+        (bundle / "Characters").mkdir()
+        (bundle / "Expansions").mkdir()
+        (bundle / "setup_talisman_digital_edition_79495_(69303).exe").write_text("x")
+        (bundle / "patch_talisman_digital_edition_76842_(48179)_to_77644_(53054).exe").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Talisman Digital Edition"
+
+    def test_grouping_multivolume_setup_dedupe(self, tmp_path):
+        grouping = tmp_path / "1-FPS"
+        grouping.mkdir()
+        (grouping / "Far Cry").mkdir()
+        (grouping / "setup_farcry_1.0_(1).exe").write_text("x")
+        (grouping / "setup_farcry_1.0_(1)-1.bin").write_text("x")
+        (grouping / "setup_gex_2.0.0.5.exe").write_text("x")
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == ["Far Cry", "Farcry", "Gex"]
+
+    def test_numbered_library_root_is_container(self, tmp_path):
+        lib = tmp_path / "1-GOG Games"
+        lib.mkdir()
+        (lib / "Biomutant").mkdir()
+        results = list(scan_games(str(tmp_path)))
+        assert [r.cleaned_name for r in results] == ["Biomutant"]
+        assert results[0].store == "GOG"
+
+    def test_root_loose_installers_yielded(self, tmp_path):
+        (tmp_path / "setup_aquanox_1.18_(19599).exe").write_text("x")
+        (tmp_path / "setup_aquanox_2_revelation_2.159_(21998).exe").write_text("x")
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == ["Aquanox", "Aquanox 2 Revelation"]
+
+    def test_gog_linux_installer_entry(self, tmp_path):
+        (tmp_path / "gog_metal_slug_2_2.0.0.2.sh").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert [r.cleaned_name for r in results] == ["Metal Slug 2"]
+
+    def test_generic_linux_installer_entry(self, tmp_path):
+        (tmp_path / "rogue_legacy_en_1_4_0_22617.sh").write_text("x")
+        (tmp_path / "chasm_1_102_89133.sh").write_text("x")
+        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
+        assert names == ["Chasm", "Rogue Legacy"]
+
+    def test_setup_build_id_before_parens_stripped(self):
+        assert _clean_gog_setup_name(
+            "setup_talisman_digital_edition_79495_(69303).exe"
+        ) == "Talisman Digital Edition"
+        assert _clean_gog_setup_name(
+            "setup_metal_slug_4_1.0_(70018).exe"
+        ) == "Metal Slug 4"
