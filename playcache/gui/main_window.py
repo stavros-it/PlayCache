@@ -59,6 +59,7 @@ class GamesProxyModel(QSortFilterProxyModel):
         self._search = ""
         self._store = "All"
         self._status = "All"
+        self._genre = "All"
 
     def set_search(self, text: str) -> None:
         self._search = (text or "").lower()
@@ -72,6 +73,10 @@ class GamesProxyModel(QSortFilterProxyModel):
         self._status = status
         self.invalidate()
 
+    def set_genre(self, genre: str) -> None:
+        self._genre = genre
+        self.invalidate()
+
     def filterAcceptsRow(self, source_row: int, source_parent) -> bool:
         source = self.sourceModel()
         if source is None:
@@ -82,6 +87,10 @@ class GamesProxyModel(QSortFilterProxyModel):
         if self._search and self._search not in (rec.game_name or "").lower():
             return False
         if self._store != "All" and (rec.store or "Other") != self._store:
+            return False
+        if self._genre != "All" and self._genre.strip().lower() not in {
+            g.strip().lower() for g in (rec.game_type or "").split("/") if g.strip()
+        }:
             return False
         return self._status == "All" or (rec.fetch_status or "") == self._status
 
@@ -326,6 +335,12 @@ class MainWindow(QMainWindow):
         self.status_combo.currentTextChanged.connect(self._proxy.set_status)
         f_layout.addWidget(self.status_combo)
 
+        f_layout.addWidget(QLabel("Genre"))
+        self.genre_combo = QComboBox()
+        self.genre_combo.addItems(["All"])
+        self.genre_combo.currentTextChanged.connect(self._proxy.set_genre)
+        f_layout.addWidget(self.genre_combo)
+
         f_layout.addStretch(1)
         splitter.addWidget(filters)
 
@@ -383,6 +398,7 @@ class MainWindow(QMainWindow):
         self._model.set_records(records)
         self._auto_resize_columns()
         self._refresh_store_filter(records)
+        self._refresh_genre_filter(records)
 
     def _refresh_store_filter(self, records: list[GameRecord]) -> None:
         """Rebuild the Store filter combo from the catalog's actual values.
@@ -404,6 +420,33 @@ class MainWindow(QMainWindow):
             self.store_combo.setCurrentIndex(0)
         self.store_combo.blockSignals(False)
         self._proxy.set_store(self.store_combo.currentText())
+
+    def _refresh_genre_filter(self, records: list[GameRecord]) -> None:
+        """Rebuild the Genre filter combo from the catalog's game types.
+
+        The Type column joins multiple genres with " / ", so the combo lists
+        the distinct individual genres and the filter matches every game
+        that contains the selected one. Case variants are deduplicated
+        (first casing wins). The current selection is preserved while it
+        still exists in the data.
+        """
+        genres: dict[str, str] = {}
+        for rec in records:
+            for g in (rec.game_type or "").split("/"):
+                g = g.strip()
+                if g:
+                    genres.setdefault(g.lower(), g)
+        current = self.genre_combo.currentText()
+        items = ["All", *sorted(genres.values())]
+        self.genre_combo.blockSignals(True)
+        self.genre_combo.clear()
+        self.genre_combo.addItems(items)
+        if current in items:
+            self.genre_combo.setCurrentText(current)
+        else:
+            self.genre_combo.setCurrentIndex(0)
+        self.genre_combo.blockSignals(False)
+        self._proxy.set_genre(self.genre_combo.currentText())
 
     def _on_field_edited(self, folder_path: str, field: str, value: str) -> None:
         """Persist an inline table edit to the DB (called via model signal)."""

@@ -30,7 +30,10 @@ produced in collaboration with AI assistants and reviewed by the author.
    TheGamesDB monthly quota (e.g. `TGDB: 890/1000`) and RAWG call count
    (e.g. `RAWG: 42 calls`) in the status bar after the first API call.
 4. Browse the sortable/filterable games table — columns auto-fit to content
-   (Excel-style); select multiple rows with Ctrl/Shift. The table uses a
+   (Excel-style); select multiple rows with Ctrl/Shift. Filter the view with
+   the left panel: Search (name substring), Store (data-driven), Status, and
+   Genre (every genre found in the Type column; a game with joined genres
+   like "Action / RPG" matches both). The table uses a
    **dark slate theme** with subtle zebra striping and an indigo selection
    state. The Status column renders as a **colored badge** (green=ok,
    amber=not_found, red=error, blue=pending) with smart contrast text chosen
@@ -73,7 +76,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 376 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 380 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -101,7 +104,7 @@ Game DB/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.6.0"
+│   ├── __init__.py             # version = "1.7.0"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
@@ -144,7 +147,7 @@ Game DB/
     ├── test_manual_overrides.py      # 10 tests + schema migration
     ├── test_item_delegate.py         # 16 tests — paint regression + badge geometry
     ├── test_close_after_scan.py      # 4 tests — Close works after a finished scan (dead QThread refs)
-    ├── test_main_window_fixes.py     # 17 tests — refetch worker races, busy guards, store filter
+    ├── test_main_window_fixes.py     # 21 tests — refetch worker races, busy guards, store + genre filters
     ├── test_scan_dialog_reject.py    # 6 tests — Escape/X routed through the cancel guard
     ├── test_detail_panel_fixes.py     # 9 tests — website scheme, save re-resolution, no-cover
     ├── test_settings_env_key.py      # 4 tests — env-sourced API keys never written to ini
@@ -156,7 +159,7 @@ Game DB/
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~6,600 LOC source + ~4,340 LOC tests = ~10,940 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~6,640 LOC source + ~4,390 LOC tests = ~11,030 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -367,7 +370,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 375 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 379 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).

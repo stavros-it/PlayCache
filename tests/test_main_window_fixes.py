@@ -191,6 +191,71 @@ def test_store_filter_refresh_preserves_selection(qapp, tmp_path):
     assert window._proxy.rowCount() == 2
 
 
+def _genre_items(window: MainWindow) -> list[str]:
+    combo = window.genre_combo
+    return [combo.itemText(i) for i in range(combo.count())]
+
+
+def test_genre_combo_populated_from_catalog(qapp, tmp_path):
+    db = Database(str(tmp_path / "lib.db"))
+    db.upsert(_record("/games/hk", game_type="Action / RPG"))
+    db.upsert(_record("/games/stardew", game_type="Indie"))
+    db.upsert(_record("/games/nogenres", game_type=""))
+    window = _window(qapp, tmp_path)
+    assert _genre_items(window) == ["All", "Action", "Indie", "RPG"]
+
+
+def test_genre_filter_matches_every_game_containing_the_genre(qapp, tmp_path):
+    db = Database(str(tmp_path / "lib.db"))
+    db.upsert(_record("/games/hk", game_type="Action / RPG"))
+    db.upsert(_record("/games/doom", game_type="Action"))
+    db.upsert(_record("/games/stardew", game_type="Indie / RPG"))
+    db.upsert(_record("/games/nogenres", game_type=""))
+    window = _window(qapp, tmp_path)
+
+    window.genre_combo.setCurrentText("RPG")
+    names = {
+        window._proxy.index(row, 0).data() for row in range(window._proxy.rowCount())
+    }
+    assert names == {"hk", "stardew"}
+
+    window.genre_combo.setCurrentText("Action")
+    names = {
+        window._proxy.index(row, 0).data() for row in range(window._proxy.rowCount())
+    }
+    assert names == {"doom", "hk"}
+
+    window.genre_combo.setCurrentText("All")
+    assert window._proxy.rowCount() == 4
+
+
+def test_genre_filter_refresh_preserves_selection(qapp, tmp_path):
+    window = _window(qapp, tmp_path)
+    window._db.upsert(_record("/games/hk", game_type="Action / RPG"))
+    window._refresh_table()
+    window.genre_combo.setCurrentText("RPG")
+    assert window.genre_combo.currentText() == "RPG"
+    window._db.upsert(_record("/games/b", game_type="Strategy"))
+    window._refresh_table()
+    assert window.genre_combo.currentText() == "RPG"
+    assert "Strategy" in _genre_items(window)
+    with window._db.connect() as conn:
+        conn.execute("DELETE FROM games WHERE folder_path = '/games/hk';")
+    window._refresh_table()
+    assert window.genre_combo.currentText() == "All"
+
+
+def test_genre_filter_dedupes_case_variants(qapp, tmp_path):
+    db = Database(str(tmp_path / "lib.db"))
+    db.upsert(_record("/games/a", game_type="Action"))
+    db.upsert(_record("/games/b", game_type="action / RPG"))
+    window = _window(qapp, tmp_path)
+    items = _genre_items(window)
+    assert items == ["All", "Action", "RPG"]
+    window.genre_combo.setCurrentText("Action")
+    assert window._proxy.rowCount() == 2
+
+
 def test_add_game_blocked_while_refetch_running(qapp, tmp_path, monkeypatch):
     window = _window(qapp, tmp_path)
     monkeypatch.setattr(QDialog, "exec", lambda self: QDialog.DialogCode.Rejected)

@@ -6,7 +6,7 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.6.0)
+## Current state (v1.7.0)
 
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
 - ✅ Folder scanning with library-root descent, smart name detection, store detection
@@ -126,6 +126,13 @@
   folder went from 13 detected rows to 162 (every game subfolder and every
   installer file). 376 tests passing (375 + 1 platform-gated skip), ruff
   clean. Version bumped to 1.6.0.
+- ✅ Genre filter (2026-09-08) — a new Genre combo in the left filter panel
+  (below Status) lists every distinct genre found in the Type column and
+  filters the table to games containing the selected one (a game with
+  "Action / RPG" matches both "Action" and "RPG"). Populated from live data
+  like the Store filter, case variants deduplicated, selection preserved
+  across refreshes. 380 tests passing (379 + 1 platform-gated skip), ruff
+  clean. Version bumped to 1.7.0.
 
 ## Priorities
 
@@ -302,6 +309,35 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-08 — Genre filter in the left panel
+
+**Trigger**: user asked for a filter menu below the Status filter that lists
+all genres found in the genres column and shows only the matching games.
+
+**Changes**:
+- `GamesProxyModel` gained a `set_genre` filter: a row passes when its
+  `game_type` (genres joined with " / ") contains the selected genre,
+  compared case-insensitively so records with drifted casing still match.
+- New Genre label + combo in the filters panel, below Status, wired to the
+  proxy like the other filters.
+- `_refresh_genre_filter` rebuilds the combo from the catalog's live data on
+  every table refresh (same pattern as the data-driven Store filter): each
+  record's Type is split on "/", stripped, deduplicated case-insensitively
+  (first casing wins), and offered sorted after "All". The current selection
+  is preserved while it still exists in the data; rows without any genre
+  remain visible only under "All".
+
+**Tests** (4 added, 376 → 380): combo populated from a mixed catalog,
+multi-genre matching both directions ("Action / RPG" matches "Action" and
+"RPG"), selection preserved across refreshes and reset when the last game
+with the genre disappears, and case-variant dedupe (combo shows canonical
+casing while lowered matching keeps drifted records visible).
+
+**Trade-offs**: the filter matches whole genre tokens only (no substring
+match), so "RPG" does not match "Action-RPG" as a single token — splitting
+is on "/" per the column's documented join format. Genres are not split on
+hyphens to avoid false positives on names like "Sci-Fi".
 
 ### 2026-09-08 — Grouping-folder descent + loose GOG installers as entries
 
