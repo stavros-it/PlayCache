@@ -83,18 +83,24 @@ NOISE_TOKENS = [
     "windows", "win", "win64", "win32",
     "linux", "appimage", "deb", "rpm", "flatpak", "snap",
     "srcgroup10", "online", "pre", "full", "unlocked",
+    "srcgroup13", "rune", "srcgroup15", "srcgroup16", "srcgroup17", "srcgroup18", "sr", "wow",
+    "srcgroup19", "srcgroup19", "srcgroup20", "srcgroup21", "srcgroup22", "srcgroup3",
+    "srcgroup23", "srcgroup24", "anomaly", "mechanics", "srcgroup25", "srcgroup26",
 ]
 
 # Regex chunks removed from folder names
 NOISE_REGEX = [
     re.compile(r"\[[^\]]*\]"),                 # [Anything In Brackets]
     re.compile(r"\([^)]*(?:crack|fix|repack|rip|multi|online|dlc|edition|build|v\d|gog|windows)[^)]*\)", re.IGNORECASE),
+    # Disc-dump tags: (USA), (Europe), (Rev 2), (En,Fr,De,Es,It)
+    re.compile(r"\((?:Rev\s*\d+|USA|Europe|Japan|World|Asia|Australia|EUR|JPN|(?:[A-Z][a-z],)+[A-Z][a-z])\)"),
+    re.compile(r"[_]+"),                       # underscores -> space (before version rule,
+                                               # so "_v1.0.4" matches the version pattern)
     re.compile(r"\b(?:v|build\.?|ver\.?|update)\s*\d[\d.]*\b", re.IGNORECASE),  # v1.2 / Build 12345
     re.compile(r"\(\d{3,}\)"),                 # ID in parentheses: (90803)
     # NOTE: do NOT strip bare 4-digit years — they are part of many game titles
     # ("Cyberpunk 2077", "Battlefield 1942", "1979 Revolution"). Release-year
     # tags in parentheses/brackets are already stripped by the rules above.
-    re.compile(r"[_]+"),                       # underscores -> space
     re.compile(r"\s{2,}"),                     # collapse spaces
 ]
 
@@ -394,7 +400,20 @@ def _resolve(
 
     archives = _archive_entries(path)
     if archives and not _collect_exe_paths(path):
+        folder_cleaned = clean_folder_name(path.name)
+        folder_key = _squash(folder_cleaned)
+        matches_folder = bool(folder_key) and any(
+            _squash(a.cleaned_name) == folder_key for a in archives
+        )
+        single_part_set = _part_sets(path) == 1
+        if (matches_folder or single_part_set) and _title_quality(folder_cleaned) > 0:
+            yield _make_scanned(path, store=store)
+            return
         yield from archives
+        for child in _list_dirs(path, _visited):
+            if _should_skip(child.name) or child.name.lower() in skip:
+                continue
+            yield from _resolve(child, skip, recursive=recursive, _visited=_visited)
         return
 
     yield _make_scanned(path, store=store)
@@ -467,8 +486,8 @@ def _clean_gog_setup_name(filename: str) -> str:
         # Skip ID patterns: (90803)
         if re.match(r"^\(\d+\)$", t):
             continue
-        # Skip version patterns: 1.4.0.0, 1.03.1628077
-        if re.match(r"^\d+(\.\d+)*$", t):
+        # Skip version patterns: 1.4.0.0, 1.03.1628077, 1.0d, v2
+        if re.match(r"^v?\d+(?:\.\d+)*[a-z]?$", t, re.IGNORECASE):
             continue
         # Skip GOG/store/format tags
         if low in _GOG_SETUP_NOISE:
@@ -843,6 +862,29 @@ def _clean_archive_name(filename: str) -> str:
     stem = _ALLCAPS_SPLIT.sub(r"\1 \2", stem)
     stem = _CAMEL_SPLIT.sub(r"\1 \2", stem)
     return clean_folder_name(stem)
+
+
+def _squash(name: str) -> str:
+    """Reduce a name to bare alphanumerics so case/punctuation can't differ."""
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _part_sets(folder: Path) -> int:
+    """Number of distinct multi-part volume bases (>=2 parts) in the folder."""
+    counts: dict[str, int] = {}
+    try:
+        for c in folder.iterdir():
+            if not c.is_file():
+                continue
+            m = _MULTIPART_RAR_RE.match(c.name)
+            if not m:
+                continue
+            base = _squash(re.sub(r"\.part\d+\.rar$", "", c.name, flags=re.IGNORECASE))
+            counts[base] = counts.get(base, 0) + 1
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot inspect %s for part sets: %s", folder, e)
+        return 0
+    return sum(1 for n in counts.values() if n >= 2)
 
 
 def _archive_entries(folder: Path) -> list[ScannedFolder]:

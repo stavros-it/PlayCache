@@ -646,3 +646,131 @@ class TestArchiveScanning:
         assert len(results) == 1
         assert results[0].folder_name == "Hollow Knight"
 
+
+
+class TestSourceTagNames:
+    def test_cpy_suffix(self):
+        assert clean_folder_name("Fifa.19-srcgroup13") == "Fifa 19"
+
+    def test_tenoke_suffix(self):
+        assert clean_folder_name("Backrooms.Exploration-srcgroup15") == "Backrooms Exploration"
+
+    def test_codex_suffix(self):
+        assert clean_folder_name("Hello.Neighbor-srcgroup12") == "Hello Neighbor"
+
+    def test_rune_suffix(self):
+        assert clean_folder_name("SpaceBourne.2-RUNE") == "SpaceBourne 2"
+
+    def test_flt_suffix(self):
+        out = clean_folder_name("Hello_Neighbor_2_Deluxe_Edition-srcgroup16")
+        assert out == "Hello Neighbor 2 Deluxe Edition"
+
+    def test_razor1911_with_underscore_version(self):
+        out = clean_folder_name(
+            "SpongeBob_SquarePants_Battle_for_Bikini_Bottom_Rehydrated_v1.0.4-srcgroup19"
+        )
+        assert out == "SpongeBob SquarePants Battle for Bikini Bottom Rehydrated"
+
+    def test_doge_folder(self):
+        out = clean_folder_name("SpongeBob.SquarePants.The.Cosmic.Shake-srcgroup18")
+        assert out == "SpongeBob SquarePants The Cosmic Shake"
+
+    def test_region_tags(self):
+        assert clean_folder_name("Unreal (USA) (Rev 2)") == "Unreal"
+        assert clean_folder_name("Some Game (Europe)") == "Some Game"
+
+    def test_language_tag(self):
+        out = clean_folder_name(
+            "Legend of Zelda, The - Twilight Princess (Europe) (En,Fr,De,Es,It)"
+        )
+        assert out == "Legend of Zelda The Twilight Princess"
+
+
+class TestSourceArchiveNames:
+    def test_tenoke_iso(self):
+        assert _clean_archive_name("srcgroup15-backrooms.exploration.iso") == "backrooms exploration"
+
+    def test_sr_prefix(self):
+        assert _clean_archive_name("sr-onlyup.iso") == "onlyup"
+
+    def test_rune_prefix(self):
+        assert _clean_archive_name("rune-netherworld.covenant.iso") == "netherworld covenant"
+
+    def test_cpy_prefix(self):
+        assert _clean_archive_name("srcgroup13-fifa19.iso") == "fifa19"
+
+    def test_wow_prefix(self):
+        out = _clean_archive_name("wow-spongebob.squarepants.the.cosmic.shake.iso")
+        assert out == "spongebob squarepants the cosmic shake"
+
+    def test_gog_setup_version_letter_tag(self):
+        assert _clean_gog_setup_name(
+            "setup_spongebob_squarepants_titans_of_the_tide_1.0d_(88455).exe"
+        ) == "Spongebob Squarepants Titans Of The Tide"
+
+    def test_gog_setup_v2_tag(self):
+        assert _clean_gog_setup_name(
+            "setup_heroes_of_might_and_magic_v_2.1_v2_(28567).exe"
+        ) == "Heroes Of Might And Magic V"
+
+
+class TestArchiveFolderResolution:
+    def test_scene_iso_folder_yields_folder(self, tmp_path):
+        folder = tmp_path / "Backrooms.Exploration-srcgroup15"
+        folder.mkdir()
+        (folder / "srcgroup15-backrooms.exploration.iso").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "Backrooms.Exploration-srcgroup15"
+        assert results[0].cleaned_name == "Backrooms Exploration"
+
+    def test_rune_iso_folder_matches_folder(self, tmp_path):
+        folder = tmp_path / "Netherworld.Covenant-RUNE"
+        folder.mkdir()
+        (folder / "rune-netherworld.covenant.iso").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "Netherworld.Covenant-RUNE"
+        assert results[0].cleaned_name == "Netherworld Covenant"
+
+    def test_multipart_set_folder_yields_folder(self, tmp_path):
+        folder = tmp_path / "SPFL 2026"
+        folder.mkdir()
+        for i in range(1, 4):
+            (folder / f"SPFL26.part{i:02d}.rar").write_text("x")
+        (folder / "com257_gre.rar").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].folder_name == "SPFL 2026"
+
+    def test_meta_folder_archives_and_subfolders(self, tmp_path):
+        meta = tmp_path / "Garten Of Ban Ban"
+        meta.mkdir()
+        g2 = meta / "Garten.of.Banban.2-srcgroup15"
+        g2.mkdir()
+        (g2 / "srcgroup15-garten.of.banban.2.iso").write_text("x")
+        (meta / "Garten of Banban 4.rar").write_text("x")
+        (meta / "Garten of Banban 6.rar").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        names = sorted(r.cleaned_name for r in results)
+        assert names == ["Garten of Banban 2", "Garten of Banban 4", "Garten of Banban 6"]
+
+    def test_gog_multivolume_setup(self, tmp_path):
+        folder = tmp_path / "SpongeBob Squarepants - Titans of the Tide [GOG]"
+        folder.mkdir()
+        base = "setup_spongebob_squarepants_titans_of_the_tide_1.0d_(88455)"
+        (folder / f"{base}.exe").write_text("x")
+        (folder / f"{base}-1.bin").write_text("x")
+        (folder / f"{base}-2.bin").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Spongebob Squarepants Titans Of The Tide"
+
+    def test_unreal_bin_cue_folder(self, tmp_path):
+        folder = tmp_path / "Unreal (USA) (Rev 2)"
+        folder.mkdir()
+        (folder / "Unreal (USA) (Rev 2).bin").write_text("x")
+        (folder / "Unreal (USA) (Rev 2).cue").write_text("x")
+        results = list(scan_games(str(tmp_path)))
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Unreal"

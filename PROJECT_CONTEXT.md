@@ -73,7 +73,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 209 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 231 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -132,7 +132,7 @@ Game DB/
 │       └── main_window.py     # toolbar, filters, table, proxy, status bar
 └── tests/                     # pytest suite
     ├── test_textutils.py             # 34 tests (NaN/Inf ratings, em-dash, truncate)
-    ├── test_folder_scanner.py        # 90 tests (smart detection + installer/PE evidence + archives)
+    ├── test_folder_scanner.py        # 112 tests (smart detection + installer/PE evidence + archives)
     ├── test_db.py                    # 18 tests (upsert_many + UNC paths + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_manual_overrides.py      # 10 tests + schema migration
@@ -143,7 +143,7 @@ Game DB/
     └── test_exporter.py             # 8 tests (formula injection sanitization)
 ```
 
-**Total**: ~5,810 LOC source + ~2,010 LOC tests = ~7,820 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~5,850 LOC source + ~2,120 LOC tests = ~7,970 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -214,12 +214,20 @@ Game DB/
    5. **Game archives** (`.zip`/`.7z`/`.rar`/`.iso`) are catalogued as games
       in their own right: the title is parsed from the archive filename
       (`Hollow.Knight.v1.0.231.32-bit.(48932).zip` → `Hollow Knight`), with
-      URL prefixes (`srcgroup1-repacks.site-…`), repack-group tokens, dotted
-      versions and `(id)` tags stripped. Multi-part RARs yield only
-      `part1`. A folder that contains archives but **no game executables**
-      is an archive holder (e.g. `Backups/`) — its archives are yielded and
-      the folder itself is not; a folder with archives **and** game exes is
-      a normal game folder (its archives are ignored).
+      URL prefixes (`srcgroup1-repacks.site-…`), repack/source-group tokens
+      (srcgroup13, rune, srcgroup15, srcgroup16, srcgroup18, sr, wow, …), dotted versions and `(id)`
+      tags stripped. Multi-part RARs yield only `part1`. Resolution rules
+      when a folder contains archives but no game executables:
+      * an archive whose squashed name equals the folder's squashed name
+        (source releases: `Fifa.19-srcgroup13/` + `srcgroup13-fifa19.iso`) → the **folder**
+        is the game, the archive is skipped;
+      * exactly one multi-part volume set (`SPFL26.part01+.rar`) → the
+        **folder** is the game, all archives (incl. side rar files) skipped;
+      * otherwise the archives are yielded as entries **and** subfolders are
+        still descended (meta folders like `Garten Of Ban Ban/` mixing
+        loose archives and per-game subfolders work).
+      Disc-dump region/revision tags — `(USA)`, `(Europe)`, `(Rev 2)`,
+      `(En,Fr,De,Es,It)` — are stripped from folder and archive names.
    Then detects store + platform. If a game is found that already exists in the
    DB on a **different disk**, a conflict handler prompts the user to choose
    which copy to keep (new / old / both).
@@ -346,7 +354,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 209 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 231 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
@@ -480,12 +488,23 @@ git push --tags
   are catalogued as games from their filename alone (nothing is extracted or
   opened). Junk stems (readme/data/saves/…) are filtered by
   `_ARCHIVE_JUNK_NAMES` in `folder_scanner.py`; an archive whose parsed name
-  is empty is skipped silently. Archives inside a folder that also contains
+  is empty is skipped silently. When a folder holds archives and no game
+  executables, resolution follows three rules: archive-name ≈ folder-name
+  (squash compare) → folder wins (source releases); one multi-part volume
+  set → folder wins, side archives skipped; else archives are yielded and
+  subfolders are also descended. Archives inside a folder that also contains
   game executables are ignored (the folder is the game); multi-part RAR
   continuation volumes (`.part2+`, `.r00`) are skipped so only
   `Game.part1.rar` yields an entry. An installed game and its archived copy
   end up as two rows with the same name — the post-scan exact-name purge
   keeps the most complete copy.
+- **source-group tokens are a denylist** — `NOISE_TOKENS` in
+  `folder_scanner.py` carries the repack/source group names (srcgroup1, srcgroup12,
+  srcgroup13, rune, srcgroup15, srcgroup16, srcgroup18, sr, wow, …). A new group that slips through
+  is fixed by adding one token there. Caveat: tokens are stripped as
+  standalone words, so a hypothetical game *named* one of these ("Wow",
+  "Rune") would lose that word from its search query — the manual-override
+  flow covers it.
 - **Installer name cleaning strips hyphens** — installer filenames are
   treated as search queries: `half-life-setup.exe` → `Half Life` (hyphen
   dropped). The API fuzzy match tolerates this; don't reuse

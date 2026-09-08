@@ -91,7 +91,15 @@
   groups, download-site URL prefixes and multi-part RAR numbering stripped).
   Folders that hold only archives yield the archives instead of a junk
   folder row; folders with game executables stay normal game folders.
-  209 tests passing, ruff clean.
+- ✅ Real-disk detection hardening (2026-09-04) — tuned against an actual
+  game drive: source-group suffixes/prefixes (srcgroup13/RUNE/srcgroup15/srcgroup16/srcgroup18/srcgroup7
+  → sr-/wow-) stripped from folders and ISO names; source-release folders
+  (ISO squash-matches folder name) resolve to the properly-cased folder;
+  single multi-part volume sets make the folder the game (side rars
+  skipped); meta folders mixing loose archives + per-game subfolders yield
+  both; disc-dump tags `(USA)/(Europe)/(Rev 2)/(En,Fr,…)` stripped; GOG
+  setup `1.0d`/`v2` version tags and `_v1.0.4-srcgroup19`-style noise
+  handled. 231 tests passing, ruff clean.
 
 ## Priorities
 
@@ -268,6 +276,55 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-09-04 — Detection hardening from a real game drive (I:)
+
+**Trigger**: user asked to read their game drive and improve detection from
+the naming actually found there. A read-only walk of `I:\` surfaced five
+real-world pattern classes the v1.5.0 scanner mishandled.
+
+**Findings → changes** (`folder_scanner.py`):
+- **source-group noise**: folders/ISOs carry source group names in both
+  positions — suffix (`Fifa.19-srcgroup13`, `Backrooms.Exploration-srcgroup15`,
+  `Hello_Neighbor_2_Deluxe_Edition-srcgroup16`) and ISO prefix (`srcgroup13-fifa19.iso`,
+  `srcgroup15-backrooms.exploration.iso`, `sr-onlyup.iso` (srcgroup7),
+  `wow-….iso` (srcgroup18), `rune-*.iso`). Added srcgroup13/rune/srcgroup15/srcgroup16/srcgroup17/
+  srcgroup18/sr/wow/srcgroup19/srcgroup20/srcgroup21/srcgroup22/srcgroup3/srcgroup23/srcgroup24/
+  anomaly/mechanics to `NOISE_TOKENS`.
+- **source-release folder resolution**: the folder name and the ISO name
+  describe the same game but the folder has the properly-cased title.
+  New rule: when a folder has archives and no game exes and one archive's
+  squashed name (`re.sub(r'[^a-z0-9]', '', name.lower())`) equals the
+  folder's squashed cleaned name, the folder is yielded and the archive
+  skipped (fixes `SpaceBourne.2-RUNE` + `rune-spacebourne.2.iso`).
+- **Multi-part volume sets**: `SPFL 2026/` holding `SPFL26.part01-11.rar`
+  plus side rars (`com257_gre.rar`) — a new `_part_sets()` helper counts
+  distinct ≥2-part volume bases; exactly one → the folder is the game and
+  every archive in it is skipped (side rar junk disappears).
+- **Meta folders**: `Garten Of Ban Ban/` mixes loose archives (games 4, 6)
+  with per-game subfolders (games 2, 3). The archive-yield path previously
+  stopped traversal — it now also descends into non-hidden subfolders, so
+  all four games surface.
+- **Disc-dump tags**: `Unreal (USA) (Rev 2)`, `(Europe)`,
+  `(En,Fr,De,Es,It)` — new region/revision/language paren regex in
+  `NOISE_REGEX`.
+- **Version-token edge cases**: GOG setups with lettered version tags
+  (`1.0d`) and `v2` tokens leaked into titles — version skip regex widened
+  to `^v?\d+(?:\.\d+)*[a-z]?$`. Underscore-attached versions
+  (`..._Rehydrated_v1.0.4-srcgroup19`) never matched the version rule (no
+  `\b` after `_`) — underscore→space now runs *before* version stripping in
+  `NOISE_REGEX`.
+
+**Tests** (22 added, 209 → 231): source suffix/prefix parsing, region tags,
+squash-match folder resolution, multi-part folder resolution, meta-folder
+mixed yield, GOG multivolume setups, bin/cue disc-dump folders.
+
+**Trade-offs**: the source-group list is a denylist — unknown groups still
+slip through (fix = one token). Tokens are stripped as standalone words, so
+a game genuinely named "Wow" or "Rune" would lose that word from its search
+query (manual overrides cover it). Squash-matching is exact-after-
+normalization, deliberately not fuzzy — a fuzzy match would risk swallowing
+genuinely different games in grouping folders.
 
 ### 2026-09-04 — Game archives (.zip/.7z/.rar/.iso) as game entries
 
