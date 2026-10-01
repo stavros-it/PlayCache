@@ -91,7 +91,7 @@ No other third-party packages. SQLite, `difflib`, `json`, `configparser`,
 ## 3. Repository layout
 
 ```
-Game DB/
+PlayCache/
 ├── run.pyw                     # GUI entry point — launches QApplication maximized (no console)
 ├── run.py                     # Console entry point (same app, stdout visible, maximized)
 ├── requirements.txt

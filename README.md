@@ -39,13 +39,13 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
      (`setup_achilles_legends_untold_1.4.0.0_(74603).exe` → `Achilles Legends Untold`)
   4. Evidence scoring — installer filenames, PE VERSIONINFO evidence
      (`ProductName` / `FileDescription` of the largest executables; rescues
-     bare `setup.exe` repacks and generic `game.exe` binaries), the cleaned
-     folder name (strips `[srcgroup10]`, `v1.2`, `-srcgroup12`, `RePack by srcgroup1`),
+     bare `setup.exe` installers and generic `game.exe` binaries), the cleaned
+     folder name (strips source tags, version numbers and group suffixes),
      plain `.exe` stems, and the parent folder name are each scored as
      `weight × title-quality`, with a bonus when two sources agree
 - **Game-archive scanning** — `.zip` / `.7z` / `.rar` / `.iso` files are
   catalogued as games in their own right, with the title parsed from the
-  archive filename (URL prefixes, repack/source-group tokens, dotted versions,
+  archive filename (URL prefixes, group tags, dotted versions,
   and `(id)` tags stripped; multi-part RARs yield only the first volume;
   nothing is extracted)
 - **Store detection** from path (Steam / GOG / Epic / Other)

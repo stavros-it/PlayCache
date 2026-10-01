@@ -310,6 +310,24 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-10-01 — Repo folder rename + README wording cleanup
+
+**Trigger**: the local repo folder was renamed from `gamedb` to `Playcache`,
+and the user asked for the README to no longer name specific unofficial sites and
+repack/source groups in its feature examples.
+
+**Changes**:
+- `PROJECT_CONTEXT.md` repository-layout tree root renamed `Game DB/` →
+  `PlayCache/` to match the new folder and the GitHub repo name.
+- `README.md` smart-name-detection bullet now says the cleaned folder name
+  strips "source tags, version numbers and group suffixes" instead of quoting
+  real-world tags, and the archive-scanning bullet says "group tags" instead
+  of "repack/source-group tokens".
+
+**Trade-offs**: none — docs-only change; code and tests are untouched. The
+scanner still strips those tokens at runtime; only the public-facing
+examples no longer name them.
+
 ### 2026-09-08 — Genre filter in the left panel
 
 **Trigger**: user asked for a filter menu below the Status filter that lists
