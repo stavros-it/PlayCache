@@ -8,6 +8,7 @@ from pathlib import Path
 from playcache.cataloger import Cataloger
 from playcache.config import Config
 from playcache.db import Database
+from playcache.folder_scanner import SOURCE_TAGS
 from playcache.models import GameRecord
 from playcache.textutils import (
     best_match,
@@ -147,8 +148,9 @@ class NotFoundTGDBClient(FakeTGDBClient):
 
 
 def _make_tree(tmp_path: Path):
+    tag = sorted(t for t in SOURCE_TAGS if t.isalpha())[0]
     (tmp_path / "Hollow Knight").mkdir()
-    (tmp_path / "Deep Rock Galactic [srcgroup10]").mkdir()
+    (tmp_path / f"Deep Rock Galactic [{tag.title()}]").mkdir()
 
 
 def test_pipeline_rawg_fetch_and_store(tmp_path):

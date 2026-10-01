@@ -2,6 +2,8 @@
 from pathlib import Path
 
 from playcache.folder_scanner import (
+    SOURCE_GROUPS,
+    SOURCE_TAGS,
     _clean_archive_name,
     _clean_exe_name,
     _clean_gog_setup_name,
@@ -14,23 +16,31 @@ from playcache.folder_scanner import (
     smart_detect_game_name,
 )
 
+_ALPHA_TAGS = sorted(t for t in SOURCE_TAGS if t.isalpha())
+_BOTH_TAGS = sorted(SOURCE_TAGS & SOURCE_GROUPS)
+TAG = _ALPHA_TAGS[0]
+TAG2 = _ALPHA_TAGS[1]
+GRP = _BOTH_TAGS[0]
+GRP2 = _BOTH_TAGS[1]
+HYPHENATED = next(t for t in sorted(SOURCE_TAGS) if "-" in t)
+
 
 class TestCleanFolderName:
     def test_simple_name(self):
         assert clean_folder_name("Hollow Knight") == "Hollow Knight"
 
     def test_strips_brackets(self):
-        assert "srcgroup10" not in clean_folder_name("Hollow Knight [srcgroup10]")
-        assert clean_folder_name("Hollow Knight [srcgroup10]") == "Hollow Knight"
+        assert TAG not in clean_folder_name(f"Hollow Knight [{TAG.title()}]")
+        assert clean_folder_name(f"Hollow Knight [{TAG.title()}]") == "Hollow Knight"
 
     def test_strips_version(self):
         out = clean_folder_name("Some Game v1.2.3")
         assert "v1" not in out
         assert "Some Game" in out
 
-    def test_strips_release_groups(self):
-        out = clean_folder_name("Doom Eternal-srcgroup12")
-        assert "srcgroup12" not in out.lower()
+    def test_strips_source_tags(self):
+        out = clean_folder_name(f"Doom Eternal-{GRP.upper()}")
+        assert GRP not in out.lower()
         assert "Doom Eternal" in out
 
     def test_strips_underscores(self):
@@ -39,9 +49,9 @@ class TestCleanFolderName:
     def test_handles_extension(self):
         assert "exe" not in clean_folder_name("Game.exe")
 
-    def test_strips_repack_tokens(self):
-        out = clean_folder_name("Far Cry 2 RePack by srcgroup1")
-        assert "srcgroup1" not in out.lower()
+    def test_strips_source_tag_words(self):
+        out = clean_folder_name(f"Far Cry 2 RePack by {TAG.title()}")
+        assert TAG not in out.lower()
         assert "repack" not in out.lower()
         assert "Far Cry 2" in out
 
@@ -80,14 +90,15 @@ class TestCleanFolderName:
         assert clean_folder_name("Counter-Strike") == "Counter-Strike"
 
     def test_strips_hyphenated_noise_tokens(self):
-        out = clean_folder_name("Doom Eternal-srcgroup12")
-        assert "srcgroup12" not in out.lower()
+        out = clean_folder_name(f"Doom Eternal-{GRP.upper()}")
+        assert GRP not in out.lower()
         assert "Doom Eternal" in out
 
-    def test_strips_online_fix_token(self):
-        out = clean_folder_name("Some Game srcgroup11")
-        assert "online" not in out.lower()
-        assert "fix" not in out.lower()
+    def test_strips_hyphenated_compound_token(self):
+        left, right = HYPHENATED.split("-")
+        out = clean_folder_name(f"Some Game {HYPHENATED}")
+        assert left not in out.lower()
+        assert right not in out.lower()
         assert "Some Game" in out
 
 
@@ -358,12 +369,12 @@ class TestScanGames:
         assert results["Hollow Knight"].store == ""
 
     def test_cleaned_name_used(self, tmp_path):
-        (tmp_path / "Hollow Knight [srcgroup10]").mkdir()
+        (tmp_path / f"Hollow Knight [{TAG.title()}]").mkdir()
         (tmp_path / "Windows").mkdir()
         results = list(scan_games(str(tmp_path)))
         hk = next(r for r in results if "Hollow" in r.folder_name)
         assert hk.cleaned_name == "Hollow Knight"
-        assert hk.folder_name == "Hollow Knight [srcgroup10]"
+        assert hk.folder_name == f"Hollow Knight [{TAG.title()}]"
 
     def test_path_must_exist(self, tmp_path):
         import pytest
@@ -418,10 +429,10 @@ class TestInstallerNameDetection:
         result = smart_detect_game_name(folder, clean_folder_name(folder.name))
         assert result == "Doom Eternal"
 
-    def test_repack_group_tokens_stripped(self, tmp_path):
+    def test_source_group_tokens_stripped(self, tmp_path):
         folder = tmp_path / "123"
         folder.mkdir()
-        (folder / "hollow_knight_dodi_setup.exe").write_text("x")
+        (folder / f"hollow_knight_{GRP}_setup.exe").write_text("x")
         result = smart_detect_game_name(folder, clean_folder_name(folder.name))
         assert result == "Hollow Knight"
 
@@ -551,13 +562,13 @@ class TestCleanArchiveName:
         assert out == "Hollow Knight"
 
     def test_url_prefix(self):
-        assert _clean_archive_name("srcgroup1-repacks.site-Hollow Knight.zip") == "Hollow Knight"
+        assert _clean_archive_name("downloads.example.com-Hollow Knight.zip") == "Hollow Knight"
 
     def test_camelcase(self):
         assert _clean_archive_name("DoomEternal.zip") == "Doom Eternal"
 
-    def test_bracketed_repack(self):
-        assert _clean_archive_name("Doom Eternal [srcgroup1 Repack].7z") == "Doom Eternal"
+    def test_bracketed_source_tag(self):
+        assert _clean_archive_name("Doom Eternal [RePack].7z") == "Doom Eternal"
 
     def test_gog_setup_archive(self):
         assert _clean_archive_name(
@@ -649,31 +660,31 @@ class TestArchiveScanning:
 
 
 
-class TestSourceTagNames:
-    def test_cpy_suffix(self):
-        assert clean_folder_name("Fifa.19-srcgroup13") == "Fifa 19"
+class TestSourceTagSuffixes:
+    def test_dotted_suffix(self):
+        assert clean_folder_name(f"Fifa.19-{TAG.upper()}") == "Fifa 19"
 
-    def test_tenoke_suffix(self):
-        assert clean_folder_name("Backrooms.Exploration-srcgroup15") == "Backrooms Exploration"
+    def test_dotted_two_word_suffix(self):
+        assert clean_folder_name(f"Backrooms.Exploration-{TAG2.upper()}") == "Backrooms Exploration"
 
-    def test_codex_suffix(self):
-        assert clean_folder_name("Hello.Neighbor-srcgroup12") == "Hello Neighbor"
+    def test_dotted_suffix_upper(self):
+        assert clean_folder_name(f"Hello.Neighbor-{GRP.upper()}") == "Hello Neighbor"
 
-    def test_rune_suffix(self):
-        assert clean_folder_name("SpaceBourne.2-RUNE") == "SpaceBourne 2"
+    def test_dotted_versioned_suffix(self):
+        assert clean_folder_name(f"SpaceBourne.2-{GRP2.upper()}") == "SpaceBourne 2"
 
-    def test_flt_suffix(self):
-        out = clean_folder_name("Hello_Neighbor_2_Deluxe_Edition-srcgroup16")
+    def test_underscore_title_with_suffix(self):
+        out = clean_folder_name(f"Hello_Neighbor_2_Deluxe_Edition-{_ALPHA_TAGS[2].upper()}")
         assert out == "Hello Neighbor 2 Deluxe Edition"
 
-    def test_razor1911_with_underscore_version(self):
+    def test_underscore_version_with_suffix(self):
         out = clean_folder_name(
-            "SpongeBob_SquarePants_Battle_for_Bikini_Bottom_Rehydrated_v1.0.4-srcgroup19"
+            f"SpongeBob_SquarePants_Battle_for_Bikini_Bottom_Rehydrated_v1.0.4-{_ALPHA_TAGS[3].upper()}"
         )
         assert out == "SpongeBob SquarePants Battle for Bikini Bottom Rehydrated"
 
-    def test_doge_folder(self):
-        out = clean_folder_name("SpongeBob.SquarePants.The.Cosmic.Shake-srcgroup18")
+    def test_dotted_long_title_with_suffix(self):
+        out = clean_folder_name(f"SpongeBob.SquarePants.The.Cosmic.Shake-{_ALPHA_TAGS[4].upper()}")
         assert out == "SpongeBob SquarePants The Cosmic Shake"
 
     def test_region_tags(self):
@@ -688,17 +699,17 @@ class TestSourceTagNames:
 
 
 class TestSourceArchiveNames:
-    def test_tenoke_iso(self):
-        assert _clean_archive_name("srcgroup15-backrooms.exploration.iso") == "backrooms exploration"
+    def test_tag_prefix(self):
+        assert _clean_archive_name(f"{TAG}-backrooms.exploration.iso") == "backrooms exploration"
 
     def test_sr_prefix(self):
         assert _clean_archive_name("sr-onlyup.iso") == "onlyup"
 
-    def test_rune_prefix(self):
-        assert _clean_archive_name("rune-netherworld.covenant.iso") == "netherworld covenant"
+    def test_tag_prefix_two(self):
+        assert _clean_archive_name(f"{TAG2}-netherworld.covenant.iso") == "netherworld covenant"
 
-    def test_cpy_prefix(self):
-        assert _clean_archive_name("srcgroup13-fifa19.iso") == "fifa19"
+    def test_tag_prefix_three(self):
+        assert _clean_archive_name(f"{GRP}-fifa19.iso") == "fifa19"
 
     def test_wow_prefix(self):
         out = _clean_archive_name("wow-spongebob.squarepants.the.cosmic.shake.iso")
@@ -716,22 +727,22 @@ class TestSourceArchiveNames:
 
 
 class TestArchiveFolderResolution:
-    def test_scene_iso_folder_yields_folder(self, tmp_path):
-        folder = tmp_path / "Backrooms.Exploration-srcgroup15"
+    def test_tag_iso_folder_yields_folder(self, tmp_path):
+        folder = tmp_path / f"Backrooms.Exploration-{TAG.upper()}"
         folder.mkdir()
-        (folder / "srcgroup15-backrooms.exploration.iso").write_text("x")
+        (folder / f"{TAG}-backrooms.exploration.iso").write_text("x")
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
-        assert results[0].folder_name == "Backrooms.Exploration-srcgroup15"
+        assert results[0].folder_name == f"Backrooms.Exploration-{TAG.upper()}"
         assert results[0].cleaned_name == "Backrooms Exploration"
 
-    def test_rune_iso_folder_matches_folder(self, tmp_path):
-        folder = tmp_path / "Netherworld.Covenant-RUNE"
+    def test_tag2_iso_folder_matches_folder(self, tmp_path):
+        folder = tmp_path / f"Netherworld.Covenant-{TAG2.upper()}"
         folder.mkdir()
-        (folder / "rune-netherworld.covenant.iso").write_text("x")
+        (folder / f"{TAG2}-netherworld.covenant.iso").write_text("x")
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
-        assert results[0].folder_name == "Netherworld.Covenant-RUNE"
+        assert results[0].folder_name == f"Netherworld.Covenant-{TAG2.upper()}"
         assert results[0].cleaned_name == "Netherworld Covenant"
 
     def test_multipart_set_folder_yields_folder(self, tmp_path):
@@ -747,9 +758,9 @@ class TestArchiveFolderResolution:
     def test_meta_folder_archives_and_subfolders(self, tmp_path):
         meta = tmp_path / "Garten Of Ban Ban"
         meta.mkdir()
-        g2 = meta / "Garten.of.Banban.2-srcgroup15"
+        g2 = meta / f"Garten.of.Banban.2-{TAG.upper()}"
         g2.mkdir()
-        (g2 / "srcgroup15-garten.of.banban.2.iso").write_text("x")
+        (g2 / f"{TAG}-garten.of.banban.2.iso").write_text("x")
         (meta / "Garten of Banban 4.rar").write_text("x")
         (meta / "Garten of Banban 6.rar").write_text("x")
         results = list(scan_games(str(tmp_path)))

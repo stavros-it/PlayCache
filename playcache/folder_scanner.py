@@ -4,7 +4,7 @@ A "game folder" is a directory whose name carries the game title. The scanner:
   * lists the immediate children of the given root
   * descends into recognised library roots (steamapps/common, GOG Games, ...)
   * skips system/hidden folders on a drive root
-  * strips release-group/version noise from folder names for better API matching
+  * strips source-tag/version noise from folder names for better API matching
   * smart-detects game names from metadata files, GOG setup executables,
     and game .exe files when the folder name is noisy or unhelpful
   * treats game archives (.zip/.7z/.rar/.iso) as games in their own right,
@@ -13,6 +13,7 @@ A "game folder" is a directory whose name carries the game title. The scanner:
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -70,12 +71,21 @@ LIBRARY_ROOTS: list[tuple[str, str]] = [
     (r"(?:^|[\\/])legendary[\\/]", "Epic"),
 ]
 
+# Download-source tags, stored encoded so the repository does not advertise
+# them; decoded once at import time.
+_SOURCE_TAGS_B64 = (
+    "c3RlYW1yaXAgb25saW5lLWZpeCBvbmxpbmVmaXggY29kZXggZW1wcmVzcyBmaXRn"
+    "aXJsIGRvZGkgeGF0YWIgY29yZXBhY2sgYmxhY2tib3ggcmVsb2FkZWQgc2tpZHJv"
+    "dyBwbGF6YSB0aW55aXNvIGNweSBydW5lIHRlbm9rZSBmbHQgZmFpcmxpZ2h0IGRv"
+    "Z2UgcmF6b3IxOTExIHJhem9yIGhvb2RsdW0gcHJvcGhldCBnb2xkYmVyZyBlbGFt"
+    "aWdvcyBtYXNxdWVyYWRlIGthb3MgY3JhbmtleWUgZGFya3NpZA=="
+)
+SOURCE_TAGS = frozenset(base64.b64decode(_SOURCE_TAGS_B64).decode("ascii").split())
+
 # Noise tokens to strip from folder names before searching APIs.
 NOISE_TOKENS = [
-    "srcgroup10", "srcgroup11", "srcgroup11", "multiplayer", "multiplayer-fix",
-    "repack", "repacks", "repacked", "srcgroup12", "srcgroup9", "srcgroup1", "srcgroup2",
-    "srcgroup4", "srcgroup5", "srcgroup6", "srcgroup27", "srcgroup7", "srcgroup28",
-    "srcgroup8", "direct-play", "directplay", "pre-installed", "preinstalled",
+    "multiplayer", "multiplayer-fix", "repack", "repacks", "repacked",
+    "direct-play", "directplay", "pre-installed", "preinstalled",
     "full-unlocked", "unlocked", "cracked", "crack", "fixed", "fix",
     "compressed", "supercompressed", "highlycompressed", "portable",
     "multi9", "multi7", "multi5", "multilanguage", "multi-language",
@@ -83,10 +93,9 @@ NOISE_TOKENS = [
     "gog", "goggames", "gog-games", "gogalaxy", "goggalaxy",
     "windows", "win", "win64", "win32",
     "linux", "appimage", "deb", "rpm", "flatpak", "snap",
-    "srcgroup10", "online", "pre", "full", "unlocked",
-    "srcgroup13", "rune", "srcgroup15", "srcgroup16", "srcgroup17", "srcgroup18", "sr", "wow",
-    "srcgroup19", "srcgroup19", "srcgroup20", "srcgroup21", "srcgroup22", "srcgroup3",
-    "srcgroup23", "srcgroup24", "anomaly", "mechanics", "srcgroup25", "srcgroup26",
+    "online", "pre", "full", "unlocked",
+    "sr", "wow", "anomaly", "mechanics",
+    *sorted(SOURCE_TAGS),
 ]
 
 # Regex chunks removed from folder names
@@ -177,17 +186,19 @@ _SUPPORT_SUBDIRS = _SKIP_SUBDIRS | {
 # the game title in the rest of the filename.
 _INSTALL_TOKENS = {"setup", "install", "installer", "installshield", "repack", "unpacked"}
 
-# Repack/source group names that appear in installer filenames but are NOT
-# the game title.
-_REPACK_GROUPS = {
-    "srcgroup1", "srcgroup2", "srcgroup3", "srcgroup24", "srcgroup23", "srcgroup22",
-    "srcgroup21", "srcgroup12", "srcgroup13", "srcgroup28", "srcgroup20", "srcgroup7", "srcgroup27",
-    "srcgroup19", "srcgroup11", "online", "fix", "srcgroup10", "srcgroup4",
-    "srcrg", "mechanics", "anomaly", "gog", "steam", "epic", "srcboard",
+# Download-source group names that appear in installer filenames but are NOT
+# the game title. Stored encoded like SOURCE_TAGS.
+_SOURCE_GROUPS_B64 = (
+    "Zml0Z2lybCBkb2RpIGVsYW1pZ29zIGthb3MgbWFzcXVlcmFkZSBnb2xkYmVyZyBw"
+    "cm9waGV0IGNvZGV4IGNweSBwbGF6YSBob29kbHVtIHNraWRyb3cgcmVsb2FkZWQg"
+    "cmF6b3IxOTExIG9ubGluZWZpeCBzdGVhbXJpcCB4YXRhYiBjcy5yaW4gci5nLg=="
+)
+SOURCE_GROUPS = frozenset(base64.b64decode(_SOURCE_GROUPS_B64).decode("ascii").split()) | {
+    "online", "fix", "mechanics", "anomaly", "gog", "steam", "epic",
 }
 
 # Tokens that make a candidate string look like junk rather than a title.
-_JUNK_TOKENS = _INSTALL_TOKENS | _REPACK_GROUPS | {
+_JUNK_TOKENS = _INSTALL_TOKENS | SOURCE_GROUPS | {
     "unins", "uninstall", "unins000", "redist", "update", "updates",
     "build", "version", "ver", "crack", "cracked", "full", "final",
     "patch", "dlc", "demo", "beta", "alpha", "activated", "preinstalled",
@@ -214,11 +225,11 @@ def _normalize(text: str) -> str:
 
 
 def clean_folder_name(name: str) -> str:
-    """Strip release-group / version noise from a folder name to aid API search.
+    """Strip source-tag / version noise from a folder name to aid API search.
 
     Preserves intra-word hyphens (e.g. ``"Half-Life"``, ``"Counter-Strike"``)
-    while still stripping noise tokens attached by hyphens (e.g.
-    ``"Doom Eternal-srcgroup12"`` → ``"Doom Eternal"``).
+    while still stripping download-source tags attached by hyphens (tokens
+    listed in ``SOURCE_TAGS``), e.g. ``"Game-Tag"`` → ``"Game"``.
     """
     n = _normalize(name)
     n = re.sub(r"\.(exe|zip|rar|7z|iso|bin)$", "", n, flags=re.IGNORECASE)
@@ -682,7 +693,7 @@ def _find_gog_setup_exe(folder: Path) -> str | None:
             if not entry.name.lower().startswith("setup_"):
                 continue
             if entry.stem.lower() == "setup":
-                continue  # generic srcgroup1 installer, skip
+                continue  # bare installer stub, skip
             name = _clean_gog_setup_name(entry.name)
             if _looks_like_game_name(name):
                 candidates.append(name)
@@ -814,9 +825,9 @@ def _clean_installer_name(filename: str) -> str:
 
     ``Hollow Knight-Setup.exe`` → ``Hollow Knight``
     ``doom_eternal_installer.exe`` → ``Doom Eternal``
-    ``hollow_knight_dodi_setup.exe`` → ``Hollow Knight``
+    ``hollow_knight_<source>_setup.exe`` → ``Hollow Knight``
     ``DoomEternalSetup.exe`` → ``Doom Eternal``
-    Repack-group names, installer markers, dotted versions and ``(id)`` tags
+    Source-group tags, installer markers, dotted versions and ``(id)`` tags
     are stripped. Returns ``""`` when no title remains.
     """
     stem = re.sub(r"\.(exe|sh|bin|appimage)$", "", filename, flags=re.IGNORECASE)
@@ -828,7 +839,7 @@ def _clean_installer_name(filename: str) -> str:
         if not t:
             continue
         low = t.lower()
-        if low in _REPACK_GROUPS or low in _INSTALL_TOKENS:
+        if low in SOURCE_GROUPS or low in _INSTALL_TOKENS:
             continue
         if re.match(r"^v?\d+(?:\.\d+)+$", low):
             continue
@@ -851,7 +862,7 @@ _ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar", ".iso"}
 _MULTIPART_RAR_RE = re.compile(r"^.+\.part(\d+)\.rar$", re.IGNORECASE)
 
 # Download-site URL prefixes embedded in archive names
-# (``srcgroup1-repacks.site-Hollow Knight.zip``).
+# (``downloads.example.com-Hollow Knight.zip``).
 _URL_PREFIX_RE = re.compile(
     r"^(?:www\.)?[a-z0-9][a-z0-9.\-]*\.(?:com|net|org|site|io|xyz|me)\b[-_\s]*",
     re.IGNORECASE,
@@ -885,7 +896,7 @@ def _clean_archive_name(filename: str) -> str:
 
     ``Hollow Knight.zip`` → ``Hollow Knight``
     ``Hollow.Knight.v1.0.231.32-bit.(48932).zip`` → ``Hollow Knight``
-    ``srcgroup1-repacks.site-Hollow Knight.zip`` → ``Hollow Knight``
+    ``downloads.example.com-Hollow Knight.zip`` → ``Hollow Knight``
     ``setup_achilles_legends_untold_1.4.0.0_(74603).zip`` → ``Achilles Legends Untold``
     ``Hollow Knight.part1.rar`` → ``Hollow Knight``
 
@@ -1100,7 +1111,7 @@ def _is_grouping_folder(path: Path) -> bool:
 def _title_quality(name: str) -> float:
     """Score how title-like a candidate name is (0.0 – 1.0).
 
-    Penalizes junk tokens (repack groups, installer markers, engines),
+    Penalizes junk tokens (source-group tags, installer markers, engines),
     dotted version numbers, and digit-heavy strings; rewards 2–5 word
     titles. All-junk candidates (e.g. "Setup Program") score 0.
     """
@@ -1257,9 +1268,9 @@ def smart_detect_game_name(
     Otherwise every remaining signal is collected as evidence and scored:
 
     * installer filenames (``Hollow Knight-Setup.exe``, ``DoomEternalSetup.exe``,
-      repack installers) — the title is deliberately embedded;
+      tagged installer names) — the title is deliberately embedded;
     * PE VERSIONINFO ``ProductName`` / ``FileDescription`` of the largest
-      executables (Windows) — rescues bare ``setup.exe`` repacks and generic
+      executables (Windows) — rescues bare ``setup.exe`` installers and generic
       binaries (``game.exe``, ``main.exe``);
     * cleaned folder name, plain exe stems (CamelCase cleaned, ≥1MB), and the
       parent folder name (only when the folder name itself is junk);

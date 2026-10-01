@@ -75,9 +75,9 @@
   (`qtutils.worker_is_running`). 168 tests passing, ruff clean.
 - ✅ Evidence-based game-name detection (2026-09-03) — installer filenames in
   any shape (`Name-Setup.exe`, `name_installer.exe`, `DoomEternalSetup.exe`,
-  repack installers with group names stripped), Windows PE
+  tagged installers with source tags stripped), Windows PE
   ProductName/FileDescription of the largest exes (rescues bare `setup.exe`
-  repacks and generic `game.exe` binaries), parent-folder fallback for
+  installers and generic `game.exe` binaries), parent-folder fallback for
   generic folder names, and one-level-deeper exe search for multi-disc
   layouts. Candidates are scored (source weight x title-quality + agreement
   bonus) instead of a rigid priority chain.
@@ -87,18 +87,18 @@
   manual via Find Duplicates… 191 tests passing, ruff clean.
 - ✅ Game archive scanning (2026-09-04) — `.zip`/`.7z`/`.rar`/`.iso` files
   found during a scan are catalogued as games in their own right, with the
-  title parsed from the archive filename (versions, `(id)` tags, repack
-  groups, download-site URL prefixes and multi-part RAR numbering stripped).
+   title parsed from the archive filename (versions, `(id)` tags, source
+   tags, download-site URL prefixes and multi-part RAR numbering stripped).
   Folders that hold only archives yield the archives instead of a junk
   folder row; folders with game executables stay normal game folders.
 - ✅ Real-disk detection hardening (2026-09-04) — tuned against an actual
-  game drive: source-group suffixes/prefixes (srcgroup13/RUNE/srcgroup15/srcgroup16/srcgroup18/srcgroup7
-  → sr-/wow-) stripped from folders and ISO names; source-release folders
+  game drive: source-tag suffixes/prefixes stripped from folders and ISO
+  names; tagged-release folders
   (ISO squash-matches folder name) resolve to the properly-cased folder;
   single multi-part volume sets make the folder the game (side rars
   skipped); meta folders mixing loose archives + per-game subfolders yield
   both; disc-dump tags `(USA)/(Europe)/(Rev 2)/(En,Fr,…)` stripped; GOG
-  setup `1.0d`/`v2` version tags and `_v1.0.4-srcgroup19`-style noise
+  setup `1.0d`/`v2` version tags and `_v1.0.4-<tag>`-style noise
   handled. 231 tests passing, ruff clean.
 - ✅ Second full-codebase audit (2026-09-08) — ~60 findings fixed across all
   layers: scan cancel no longer corrupts rows or writes during dry-runs;
@@ -310,11 +310,36 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-10-01 — Source-tag lists obfuscated, git history scrubbed
+
+**Trigger**: the user asked that the public repository no longer carry
+download-source names in plaintext — neither in current files nor anywhere
+in the git history.
+
+**Changes**:
+- `folder_scanner.py`: the tag lists folded into `NOISE_TOKENS` and the
+  installer junk groups are now stored base64-encoded (`SOURCE_TAGS`,
+  `SOURCE_GROUPS`) and decoded once at import. Behavior is unchanged — the
+  same tokens are stripped case-insensitively from folder, installer and
+  archive names, and all 379 tests pass untouched in substance.
+- Tests build fixture names from the decoded sets instead of literals, so
+  coverage is identical without plaintext in the test files.
+- `PROJECT_CONTEXT.md` / `ROADMAP.md` examples now use `<tag>` /
+  `downloads.example.com` placeholders.
+- Git history was rewritten with `git-filter-repo` (blob + message
+  replacement) and force-pushed; release tags were rewritten under the same
+  names so existing GitHub releases stay attached.
+
+**Trade-offs**: the tags are obfuscated, not secret — a determined reader
+can decode the blobs. Adding a future tag means one re-encode step. Generic
+release words ("repack", "crack") remain plaintext in the denylist because
+they are descriptive terms, not brand names.
+
 ### 2026-10-01 — Repo folder rename + README wording cleanup
 
 **Trigger**: the local repo folder was renamed from `gamedb` to `Playcache`,
-and the user asked for the README to no longer name specific unofficial sites and
-repack/source groups in its feature examples.
+and the user asked for the README to no longer name specific download
+sources and group tags in its feature examples.
 
 **Changes**:
 - `PROJECT_CONTEXT.md` repository-layout tree root renamed `Game DB/` →
@@ -322,7 +347,7 @@ repack/source groups in its feature examples.
 - `README.md` smart-name-detection bullet now says the cleaned folder name
   strips "source tags, version numbers and group suffixes" instead of quoting
   real-world tags, and the archive-scanning bullet says "group tags" instead
-  of "repack/source-group tokens".
+  of "source-group tags".
 
 **Trade-offs**: none — docs-only change; code and tests are untouched. The
 scanner still strips those tokens at runtime; only the public-facing
@@ -513,19 +538,18 @@ the naming actually found there. A read-only walk of `I:\` surfaced five
 real-world pattern classes the v1.5.0 scanner mishandled.
 
 **Findings → changes** (`folder_scanner.py`):
-- **source-group noise**: folders/ISOs carry source group names in both
-  positions — suffix (`Fifa.19-srcgroup13`, `Backrooms.Exploration-srcgroup15`,
-  `Hello_Neighbor_2_Deluxe_Edition-srcgroup16`) and ISO prefix (`srcgroup13-fifa19.iso`,
-  `srcgroup15-backrooms.exploration.iso`, `sr-onlyup.iso` (srcgroup7),
-  `wow-….iso` (srcgroup18), `rune-*.iso`). Added srcgroup13/rune/srcgroup15/srcgroup16/srcgroup17/
-  srcgroup18/sr/wow/srcgroup19/srcgroup20/srcgroup21/srcgroup22/srcgroup3/srcgroup23/srcgroup24/
-  anomaly/mechanics to `NOISE_TOKENS`.
-- **source-release folder resolution**: the folder name and the ISO name
+- **Source-tag noise**: folders/ISOs carry source tags in both
+  positions — suffix (`Fifa.19-<tag>`, `Backrooms.Exploration-<tag>`,
+  `Hello_Neighbor_2_Deluxe_Edition-<tag>`) and ISO prefix (`<tag>-fifa19.iso`,
+  `<tag>-backrooms.exploration.iso`, `sr-onlyup.iso`,
+  `wow-….iso`, `<tag>-*.iso`). Added the source-tag set (now the encoded
+  `SOURCE_TAGS` blob merged into `NOISE_TOKENS`).
+- **Tagged-release folder resolution**: the folder name and the ISO name
   describe the same game but the folder has the properly-cased title.
   New rule: when a folder has archives and no game exes and one archive's
   squashed name (`re.sub(r'[^a-z0-9]', '', name.lower())`) equals the
   folder's squashed cleaned name, the folder is yielded and the archive
-  skipped (fixes `SpaceBourne.2-RUNE` + `rune-spacebourne.2.iso`).
+  skipped (fixes `SpaceBourne.2-<tag>` + `<tag>-spacebourne.2.iso`).
 - **Multi-part volume sets**: `SPFL 2026/` holding `SPFL26.part01-11.rar`
   plus side rars (`com257_gre.rar`) — a new `_part_sets()` helper counts
   distinct ≥2-part volume bases; exactly one → the folder is the game and
@@ -540,15 +564,15 @@ real-world pattern classes the v1.5.0 scanner mishandled.
 - **Version-token edge cases**: GOG setups with lettered version tags
   (`1.0d`) and `v2` tokens leaked into titles — version skip regex widened
   to `^v?\d+(?:\.\d+)*[a-z]?$`. Underscore-attached versions
-  (`..._Rehydrated_v1.0.4-srcgroup19`) never matched the version rule (no
+  (`..._Rehydrated_v1.0.4-<tag>`) never matched the version rule (no
   `\b` after `_`) — underscore→space now runs *before* version stripping in
   `NOISE_REGEX`.
 
-**Tests** (22 added, 209 → 231): source suffix/prefix parsing, region tags,
+**Tests** (22 added, 209 → 231): source-tag suffix/prefix parsing, region tags,
 squash-match folder resolution, multi-part folder resolution, meta-folder
 mixed yield, GOG multivolume setups, bin/cue disc-dump folders.
 
-**Trade-offs**: the source-group list is a denylist — unknown groups still
+**Trade-offs**: the source-tag list is a denylist — unknown tags still
 slip through (fix = one token). Tokens are stripped as standalone words, so
 a game genuinely named "Wow" or "Rune" would lose that word from its search
 query (manual overrides cover it). Squash-matching is exact-after-
@@ -568,9 +592,9 @@ zip/7z/rar/iso.
   `ScannedFolder` per game archive; `folder_path` is the archive file path
   (works as the DB upsert key; "Open folder" opens the parent directory).
 - `_clean_archive_name()` parses the title: extension stripped, URL-ish
-  prefixes (`srcgroup1-repacks.site-…`) removed, then the existing
-  `clean_folder_name` pipeline handles versions, `(id)` tags and repack
-  groups. `setup_*.zip`-style archives delegate to the GOG setup parser
+  prefixes (`downloads.example.com-…`) removed, then the existing
+  `clean_folder_name` pipeline handles versions, `(id)` tags and source
+  tags. `setup_*.zip`-style archives delegate to the GOG setup parser
   (`_GOG_SETUP_RE` extended with archive extensions). CamelCase stems are
   split (`DoomEternal.zip` → `Doom Eternal`). Junk stems (readme, data,
   saves, …) are rejected via `_ARCHIVE_JUNK_NAMES`.
@@ -578,7 +602,7 @@ zip/7z/rar/iso.
   containers, and replace a folder that contains archives but **no game
   executables** (an archive holder such as `Backups/` no longer becomes a
   junk "Backups" row). A folder with archives **and** game exes stays a
-  normal game folder — its archives are ignored (repack-folder layout).
+   normal game folder — its archives are ignored (installer-holder layout).
 - Multi-part RAR: only `Game.part1.rar` yields an entry; `.part2+` and
   `.r00`-style volumes are skipped. Split `.zip.001` volumes are naturally
   excluded (unknown extension).
@@ -611,12 +635,12 @@ evidence-scoring design.
   priority chain with `_best_name_from_evidence`.
 - Installer filenames of any shape are parsed (`_looks_like_installer` +
   `_clean_installer_name`): separated tokens (`Hollow Knight-Setup.exe`),
-  CamelCase-attached suffixes (`DoomEternalSetup.exe`), repack-group names
-  (srcgroup1/srcgroup2/srcgroup3/…) stripped, dotted versions and `(id)` tags dropped.
+  CamelCase-attached suffixes (`DoomEternalSetup.exe`), source-group tags
+  stripped, dotted versions and `(id)` tags dropped.
 - **PE VERSIONINFO reading** (`_read_pe_metadata`, Windows-only ctypes
   `version.dll`) extracts `ProductName`/`FileDescription` from the ≤3 largest
   executables — the only signal that works when BOTH the folder name and the
-  filename are useless (bare `setup.exe` repacks, `game.exe`, `main.exe`).
+   filename are useless (bare `setup.exe` installers, `game.exe`, `main.exe`).
 - Executables are searched one subfolder level deeper when the top level
   yields nothing (multi-disc layouts); the parent folder name is a last-resort
   candidate only when the folder name itself is junk.
@@ -634,7 +658,7 @@ evidence-scoring design.
 - Called in `_open_scan_dialog` after the dialog closes; failures are logged
   and never block the table refresh. Fuzzy duplicates remain manual.
 
-**Tests** (23 added, 168 → 191): installer shapes, repack stripping, bare
+**Tests** (23 added, 168 → 191): installer shapes, source-tag stripping, bare
 `setup.exe` fallback, PE rescue/beat-stem/junk-rejection (PE monkeypatched —
 CI never touches ctypes), depth-2 search, parent fallback, and 9 purge tests
 including the never-remove-all and override-completeness cases.
@@ -748,7 +772,7 @@ and all GUI modules.
   `rglob("*")` so subdirectories are also cleaned.
 - **`clean_folder_name` hyphen preservation** (`folder_scanner.py`):
   intra-word hyphens are now preserved (`Half-Life`, `Counter-Strike`),
-  while noise tokens attached by hyphens (`Doom Eternal-srcgroup12`) are still
+  while noise tokens attached by hyphens (`Doom Eternal-<tag>`) are still
   stripped. Previously the function split on ALL hyphens, destroying
   hyphenated game titles.
 - **Store detection false positives** (`folder_scanner.py`): the overly
@@ -853,7 +877,7 @@ and all GUI modules.
 
 **New tests** (30 added, 134 → 164 total):
 - `test_folder_scanner.py`: GOG base-game preference, hyphen preservation,
-  srcgroup11 stripping.
+  hyphenated source-tag stripping.
 - `test_backup.py`: atomic export (no `.tmp` left), non-string folder_path
   rejection, `replace_all` atomicity.
 - `test_exporter.py` (new): formula injection sanitization (`=`, `+`, `@`),

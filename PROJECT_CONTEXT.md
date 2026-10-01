@@ -216,11 +216,11 @@ PlayCache/
    3. GOG setup executable filename (`setup_achilles_legends_untold_1.4.0.0_(74603).exe` → `Achilles Legends Untold`)
    4. **Evidence scoring** (`_best_name_from_evidence`): candidates are
       collected from installer filenames (`Hollow Knight-Setup.exe`,
-      `doom_eternal_installer.exe`, `DoomEternalSetup.exe` — repack-group
-      names like srcgroup1/srcgroup2 stripped), PE VERSIONINFO
+      `doom_eternal_installer.exe`, `DoomEternalSetup.exe` — source-group
+      tags stripped), PE VERSIONINFO
       `ProductName`/`FileDescription` of the ≤3 largest executables
       (Windows-only via ctypes `version.dll`; rescues bare `setup.exe`
-      repacks and generic `game.exe` binaries), the cleaned folder name,
+      installers and generic `game.exe` binaries), the cleaned folder name,
       plain exe stems (≥1MB), and the parent folder name (only when the
       folder name itself is junk). Each candidate scores
       `weight × title-quality` (+0.10 when two sources agree); executables
@@ -230,12 +230,12 @@ PlayCache/
    5. **Game archives** (`.zip`/`.7z`/`.rar`/`.iso`) are catalogued as games
       in their own right: the title is parsed from the archive filename
       (`Hollow.Knight.v1.0.231.32-bit.(48932).zip` → `Hollow Knight`), with
-      URL prefixes (`srcgroup1-repacks.site-…`), repack/source-group tokens
-      (srcgroup13, rune, srcgroup15, srcgroup16, srcgroup18, sr, wow, …), dotted versions and `(id)`
+      URL prefixes (`downloads.example.com-…`), source-group tags (kept
+      encoded in `SOURCE_TAGS`), dotted versions and `(id)`
       tags stripped. Multi-part RARs yield only `part1`. Resolution rules
       when a folder contains archives but no game executables:
       * an archive whose squashed name equals the folder's squashed name
-        (source releases: `Fifa.19-srcgroup13/` + `srcgroup13-fifa19.iso`) → the **folder**
+        (tagged releases: `Fifa.19-<tag>/` + `<tag>-fifa19.iso`) → the **folder**
         is the game, the archive is skipped;
       * exactly one multi-part volume set (`SPFL26.part01+.rar`) → the
         **folder** is the game, all archives (incl. side rar files) skipped;
@@ -557,7 +557,7 @@ git push --tags
   `_ARCHIVE_JUNK_NAMES` in `folder_scanner.py`; an archive whose parsed name
   is empty is skipped silently. When a folder holds archives and no game
   executables, resolution follows three rules: archive-name ≈ folder-name
-  (squash compare) → folder wins (source releases); one multi-part volume
+   (squash compare) → folder wins (tagged releases); one multi-part volume
   set → folder wins, side archives skipped; else archives are yielded and
   subfolders are also descended. Archives inside a folder that also contains
   game executables are ignored (the folder is the game); multi-part RAR
@@ -565,13 +565,13 @@ git push --tags
   `Game.part1.rar` yields an entry. An installed game and its archived copy
   end up as two rows with the same name — the post-scan exact-name purge
   keeps the most complete copy.
-- **source-group tokens are a denylist** — `NOISE_TOKENS` in
-  `folder_scanner.py` carries the repack/source group names (srcgroup1, srcgroup12,
-  srcgroup13, rune, srcgroup15, srcgroup16, srcgroup18, sr, wow, …). A new group that slips through
-  is fixed by adding one token there. Caveat: tokens are stripped as
-  standalone words, so a hypothetical game *named* one of these ("Wow",
-  "Rune") would lose that word from its search query — the manual-override
-  flow covers it.
+- **Source-group tags are a denylist** — `NOISE_TOKENS` in
+  `folder_scanner.py` merges the encoded `SOURCE_TAGS` set (stored
+  base64-encoded so the repository does not advertise download-source
+  names). A new tag that slips through is fixed by adding one token to the
+  encoded blob. Caveat: tokens are stripped as standalone words, so a
+  hypothetical game *named* one of these ("Wow", "Rune") would lose that
+  word from its search query — the manual-override flow covers it.
 - **Installer name cleaning strips hyphens** — installer filenames are
   treated as search queries: `half-life-setup.exe` → `Half Life` (hyphen
   dropped). The API fuzzy match tolerates this; don't reuse
