@@ -6,6 +6,7 @@ don't need to duplicate the QApplication bootstrap.
 """
 from __future__ import annotations
 
+import gc
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -22,3 +23,6 @@ def qapp():
         warnings.simplefilter("ignore")
         app = QApplication.instance() or QApplication([])
     yield app
+    gc.collect()
+    app.processEvents()
+    gc.collect()

@@ -310,6 +310,39 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-11-21 — CI shutdown segfault fixed in the main-window tests
+
+**Trigger**: CI passed all 385 tests, then the pytest process died with exit
+139/135 at interpreter shutdown ("QObject: shared QObject was deleted
+directly"), turning the run red.
+
+**Changes**:
+- `tests/test_main_window_fixes.py`: autouse fixture closes and deletes all
+  top-level widgets after each test, so no `MainWindow` outlives the
+  `QApplication`. Per-test bisect on CI showed any test that built a window
+  triggered the crash. The file's module-scoped `qapp` override never
+  disposed them.
+- `tests/conftest.py`: `qapp` teardown also runs `gc.collect()` and
+  `processEvents()`.
+
+**Trade-offs**: `PySide6` stays unpinned. The crash was in test hygiene, not
+the app, so no version pin was needed.
+
+### 2026-11-20 — Scanner sets platform to SWITCH for Switch dumps
+
+**Trigger**: Switch dump folders (`[NSP]`, `[NSZ]`) were catalogued as `PC`
+and had to be corrected by hand in the database.
+
+**Changes**:
+- `folder_scanner.py`: new `has_switch_dump()` checks a game folder and up to
+  2 subfolder levels for `.nsp`/`.nsz`/`.xci`/`.xcz`; `_make_scanned` uses it
+  to set `platform="SWITCH"` ahead of path hints.
+- 5 tests added (380 -> 385).
+
+**Trade-offs**: extension match only, no folder-name tags, so a folder named
+`[NSP]` with no dump files stays `PC`. Depth is capped at 2 to keep scans of
+slow drives cheap.
+
 ### 2026-10-01 — Source-tag lists obfuscated, git history scrubbed
 
 **Trigger**: the user asked that the public repository no longer carry

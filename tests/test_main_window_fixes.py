@@ -44,6 +44,16 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _dispose_windows(qapp):
+    yield
+    for widget in QApplication.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    qapp.processEvents()
+    qapp.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
 def _record(folder_path: str, **kw) -> GameRecord:
     name = folder_path.rsplit("/", 1)[-1]
     base = {

@@ -8,10 +8,12 @@ from playcache.folder_scanner import (
     _clean_exe_name,
     _clean_gog_setup_name,
     _looks_like_game_name,
+    _make_scanned,
     _normalize_root,
     clean_folder_name,
     detect_platform,
     detect_store,
+    has_switch_dump,
     scan_games,
     smart_detect_game_name,
 )
@@ -333,6 +335,42 @@ class TestDetectPlatform:
 
     def test_fan_port(self):
         assert detect_platform("D:/Fan Port/Zelda") == "PC (Fan Port)"
+
+
+class TestSwitchDumpPlatform:
+    def test_nsp_in_folder(self, tmp_path: Path):
+        g = tmp_path / "Kirby Star Allies"
+        g.mkdir()
+        (g / "game.nsp").write_bytes(b"x")
+        assert has_switch_dump(g)
+        assert _make_scanned(g, store="").platform == "SWITCH"
+
+    def test_nsz_xci_xcz_case_insensitive(self, tmp_path: Path):
+        for ext in (".NSZ", ".xci", ".XCZ"):
+            g = tmp_path / f"Game{ext[1:]}"
+            g.mkdir()
+            (g / f"dump{ext}").write_bytes(b"x")
+            assert has_switch_dump(g)
+
+    def test_nested_dump(self, tmp_path: Path):
+        g = tmp_path / "Collection"
+        (g / "Disc 1").mkdir(parents=True)
+        (g / "Disc 1" / "a.nsp").write_bytes(b"x")
+        assert has_switch_dump(g)
+
+    def test_too_deep_ignored(self, tmp_path: Path):
+        g = tmp_path / "Deep"
+        d = g / "a" / "b" / "c"
+        d.mkdir(parents=True)
+        (d / "a.nsp").write_bytes(b"x")
+        assert not has_switch_dump(g)
+
+    def test_plain_pc_folder_unchanged(self, tmp_path: Path):
+        g = tmp_path / "Hollow Knight"
+        g.mkdir()
+        (g / "hk.exe").write_bytes(b"x")
+        assert not has_switch_dump(g)
+        assert _make_scanned(g, store="").platform == "PC"
 
 
 class TestScanGames:

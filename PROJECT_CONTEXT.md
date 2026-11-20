@@ -76,7 +76,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 380 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 385 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -136,7 +136,7 @@ PlayCache/
 └── tests/                     # pytest suite
     ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture
     ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
-    ├── test_folder_scanner.py        # 141 tests (smart detection + archives + installers + grouping descent)
+    ├── test_folder_scanner.py        # 146 tests (smart detection + archives + installers + grouping descent + Switch dumps)
     ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_cataloger_behavior.py    # 10 tests (cancel sentinel, only_missing, provider, rescan seeding)
@@ -428,6 +428,12 @@ git push --tags
 
 ## 9. Known limitations & gotchas
 
+- **Switch dump platform detection** — `_make_scanned` in `folder_scanner.py`
+  sets `platform="SWITCH"` when `has_switch_dump()` finds a `.nsp`, `.nsz`,
+  `.xci` or `.xcz` file in the game folder or up to 2 subfolder levels below
+  it. This overrides path-based hints (`PC (Linux)`, `PC (Mod)`). Archive and
+  loose-installer entries still use `detect_platform` only. Loose dump files
+  outside a game folder do not become entries.
 - **Grouping-folder descent + loose installers (2026-09-08, v1.6.0)** — real
   libraries organize games into genre buckets (`1-ARCADE/`, `1-RPG/`, …) that
   mix game subfolders with loose `setup_*.exe` / `gog_*.sh` download files.

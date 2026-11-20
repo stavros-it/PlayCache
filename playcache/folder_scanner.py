@@ -276,6 +276,29 @@ def detect_platform(path: str) -> str:
     return "PC"
 
 
+SWITCH_DUMP_EXTS = frozenset({".nsp", ".nsz", ".xci", ".xcz"})
+SWITCH_PLATFORM = "SWITCH"
+_SWITCH_SCAN_DEPTH = 2
+
+
+def has_switch_dump(path: Path, depth: int = _SWITCH_SCAN_DEPTH) -> bool:
+    try:
+        children = list(path.iterdir())
+    except (PermissionError, OSError) as e:
+        log.debug("Cannot list %s for Switch dumps: %s", path, e)
+        return False
+    for c in children:
+        try:
+            if c.is_file():
+                if c.suffix.lower() in SWITCH_DUMP_EXTS:
+                    return True
+            elif depth > 0 and c.is_dir() and not _is_hidden(c) and has_switch_dump(c, depth - 1):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _is_hidden(path: Path) -> bool:
     return path.name.startswith((".", "$"))
 
@@ -471,7 +494,7 @@ def _make_scanned(path: Path, store: str, exe_paths: list[Path] | None = None) -
     # Smart-detect: try metadata files, GOG setup exes, and game .exe files
     # to find a better name than the (possibly noisy) folder name.
     cleaned = smart_detect_game_name(path, cleaned, exe_paths)
-    platform = detect_platform(str(path))
+    platform = SWITCH_PLATFORM if has_switch_dump(path) else detect_platform(str(path))
     resolved_store = detect_store(str(path), api_store_hint=store) or store
     return ScannedFolder(
         folder_name=name,
