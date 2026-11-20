@@ -75,6 +75,8 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   alphabetical sort by default, custom sort keys for date and rating columns
 - **Detail panel** — cover image, all metadata, YouTube gameplay search,
   inline-editable fields
+- **Switch dump detection** — a game folder containing `.nsp`, `.nsz`, `.xci`
+  or `.xcz` files (up to 2 levels deep) is catalogued with platform `SWITCH`
 - **Multi-row selection** with bulk re-fetch and bulk delete
 - **Stats dialog** — metric cards (totals + completeness) and bar charts
   (by status, source, platform, store, ESRB, disk, release year). The "By disk"
@@ -289,7 +291,7 @@ python -m pytest tests/ -q
 ```
 
 The tests use mocked API responses (no network) and cover: name cleaning,
-smart game-name detection, store/platform detection, recursive container
+smart game-name detection, store/platform detection (incl. Switch dumps), recursive container
 descent, DB upserts, TheGamesDB + RAWG response parsing, the merge step,
 the rescan/skip logic, manual override persistence, schema migration, the
 Excel round-trip, and compressed JSON backup/restore (round-trip, merge,

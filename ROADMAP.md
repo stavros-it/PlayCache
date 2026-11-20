@@ -6,8 +6,10 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.7.0)
+## Current state (v1.8.0)
 
+- ✅ Switch dump detection (2026-11-20) — folders holding `.nsp`/`.nsz`/`.xci`/`.xcz`
+  files are catalogued with platform `SWITCH`
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
 - ✅ Folder scanning with library-root descent, smart name detection, store detection
 - ✅ Smart game-name detection — 6-priority chain (Steam manifest → GOG metadata →
