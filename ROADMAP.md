@@ -325,12 +325,12 @@ Linux AppImage).
 directly"), turning the run red.
 
 **Changes**:
-- `tests/test_main_window_fixes.py`: autouse fixture closes and deletes all
-  top-level widgets after each test, so no `MainWindow` outlives the
-  `QApplication`. Per-test bisect on CI showed any test that built a window
-  triggered the crash. The file's module-scoped `qapp` override never
-  disposed them.
-- `tests/conftest.py`: `qapp` teardown also runs `gc.collect()` and
+- `tests/conftest.py`: global autouse fixture closes and deletes all
+  top-level widgets after every test, so no `MainWindow` or dialog outlives
+  the `QApplication`. Per-test bisect on CI showed any test that built a
+  window triggered the crash. A first fix limited to
+  `test_main_window_fixes.py` proved incomplete (the crash was flaky), hence
+  the suite-wide fixture. `qapp` teardown also runs `gc.collect()` and
   `processEvents()`.
 
 **Trade-offs**: `PySide6` stays unpinned. The crash was in test hygiene, not

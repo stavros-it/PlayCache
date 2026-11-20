@@ -134,7 +134,7 @@ PlayCache/
 │       ├── duplicates_dialog.py # fuzzy duplicate finder + resolver
 │       └── main_window.py     # toolbar, filters, table, proxy, status bar
 └── tests/                     # pytest suite
-    ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture (gc + drain at teardown)
+    ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture + autouse fixture that closes/deletes top-level widgets after every test
     ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
     ├── test_folder_scanner.py        # 146 tests (smart detection + archives + installers + grouping descent + Switch dumps)
     ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
@@ -147,7 +147,7 @@ PlayCache/
     ├── test_manual_overrides.py      # 10 tests + schema migration
     ├── test_item_delegate.py         # 16 tests — paint regression + badge geometry
     ├── test_close_after_scan.py      # 4 tests — Close works after a finished scan (dead QThread refs)
-    ├── test_main_window_fixes.py     # 21 tests — refetch worker races, busy guards, store + genre filters; autouse fixture disposes windows
+    ├── test_main_window_fixes.py     # 21 tests — refetch worker races, busy guards, store + genre filters
     ├── test_scan_dialog_reject.py    # 6 tests — Escape/X routed through the cancel guard
     ├── test_detail_panel_fixes.py     # 9 tests — website scheme, save re-resolution, no-cover
     ├── test_settings_env_key.py      # 4 tests — env-sourced API keys never written to ini
