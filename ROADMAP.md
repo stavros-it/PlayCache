@@ -310,6 +310,12 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-11-21 — Release v1.8.0
+
+Version bumped 1.7.0 -> 1.8.0 for Switch dump platform detection in the
+scanner. Tag `v1.8.0` triggers the release workflow (Windows portable zip +
+Linux AppImage).
+
 ### 2026-11-21 — CI shutdown segfault fixed in the main-window tests
 
 **Trigger**: CI passed all 385 tests, then the pytest process died with exit
