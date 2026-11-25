@@ -158,12 +158,12 @@ sure it holds up against live APIs and real game libraries.
 - **📋 TheGamesDB response-shape audit** — same, for the fallback path.
   The `include` block (genres/developers/publishers as id→name maps) is the
   most likely place for surprises.
-- **📋 Error reporting in UI** — surface `fetch_message` somewhere visible
-  (a "Problems" filter or a tooltip) so users can see *why* a game is
-  `not_found` without opening the DB.
-- **📋 Rate-limit handling** — the current 0.3s delay is hardcoded; consider
-  respecting `Retry-After` headers on 429s (currently we just back off
-  exponentially).
+- **✅ Error reporting in UI** — `fetch_message` shows in the table row
+  tooltip and as the "Message" field in the detail panel. *(A dedicated
+  "Problems" filter is not built.)*
+- **✅ Rate-limit handling** — both clients honor `Retry-After` on 429s (capped
+  at 60s) and back off exponentially otherwise; the per-request delay is
+  configurable via `request_delay` (default 0.3s).
 
 ## 2. UX polish
 
@@ -211,9 +211,10 @@ The functional core is solid; these make the app feel professional.
 - **📋 Manual override UI** — there's no way to *clear* an override from the
   GUI. Add a "Reset to API value" button in the detail panel that calls
   `db.clear_override()` and re-fetches. The README already mentions this gap.
-- **📋 Better platform detection** — currently Windows-only guesses. Add
-  macOS (`/Applications`, `~/Library/Application Support/Steam/steamapps/common`)
-  and Linux (`~/.steam/steam/steamapps/common`) roots and skip folders.
+- **📋 macOS platform detection** — Windows and Linux system folders and
+  executables are handled; add macOS (`/Applications`,
+  `~/Library/Application Support/Steam/steamapps/common`) roots and skip
+  folders.
 - **✅ Manual game add** — let the user add a game by typing its name, without
   a folder on disk. Useful for cataloguing games not currently installed.
   Implemented as "Add Game…" (Ctrl+N) with a synthetic `/manual/<name>` path.
@@ -247,21 +248,17 @@ The functional core is solid; these make the app feel professional.
   `Game_Library.xlsx` into the DB (currently the round-trip is only tested
   in code, not exposed in the UI). *The original `Game_Library.xlsx` reference
   file is no longer bundled with the repo — it contained personal catalog data.*
-- **📋 Backup/restore** — a "Backup database…" menu item that copies the
-  `.db` file to a timestamped path. Useful before big rescans.
 - **📋 Schema versioning** — replace the ad-hoc `_migrate()` with a proper
   `schema_version` table and ordered migration scripts. Needed if the schema
   keeps evolving.
 
 ## 6. Code health & infrastructure
 
-- **📋 First commit** — the repo has zero commits. Establish `main` with the
-  current tree and a clean `.gitignore` (already in place).
-- **📋 CI workflow** — GitHub Actions running `ruff check` + `pytest` on push.
-  Use `QT_QPA_PLATFORM=offscreen` so GUI imports work headless.
-- **📋 `pyproject.toml`** — migrate from ad-hoc files to a modern
-  `pyproject.toml` with `[project]`, `[tool.ruff]`, `[tool.pytest.ini_options]`.
-  Consider making `playcache` an installable package.
+- **✅ First commit** — `main` established with a clean `.gitignore`.
+- **✅ CI workflow** — GitHub Actions runs `ruff check` + `pytest` on push and
+  PR with `QT_QPA_PLATFORM=offscreen` (`.github/workflows/ci.yml`).
+- **✅ `pyproject.toml`** — `[project]`, `[tool.ruff]`, and
+  `[tool.pytest.ini_options]` in place; `playcache` is an installable package.
 - **📋 Type checking** — add `mypy` or `pyright` to CI. The codebase is fully
   type-hinted so this should be low-friction.
 - **📋 Logging configuration** — add a `--verbose` / `-v` flag and a file
@@ -311,6 +308,16 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-11-25 — Roadmap audit
+
+**Trigger**: several items still marked planned had shipped. **Audit against
+code**: marked done first commit, CI workflow, `pyproject.toml`, rate-limit
+handling (`Retry-After` honored, `request_delay` configurable), and error
+reporting in UI (row tooltip + detail panel Message). Removed the duplicate
+"Backup database" item (covered by Backup/Restore). Narrowed "Better platform
+detection" to macOS only, since Linux support already shipped. Remaining open
+items verified absent from the code.
 
 ### 2026-11-21 — Release v1.8.0
 
