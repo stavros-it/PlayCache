@@ -4,11 +4,14 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QSortFilterProxyModel, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -16,6 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QProgressDialog,
     QSplitter,
     QStatusBar,
     QTableView,
@@ -25,9 +29,10 @@ from PySide6.QtWidgets import (
 )
 
 from .. import __version__
-from ..backup import export_backup, import_backup
+from ..backup import count_cached_covers, export_backup, import_backup, is_full_backup
 from ..cataloger import Cataloger
-from ..config import Config
+from ..config import Config, catalog_settings, restore_catalog_settings
+from ..covers import download_cover, missing_covers
 from ..db import Database
 from ..exporter import export_xlsx
 from ..image_cache import ImageCache
@@ -903,32 +908,71 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Export failed", str(e))
 
     def _export_backup(self) -> None:
-        """Export the full catalog to a compressed JSON backup (``.json.gz``)."""
-        default_name = str(Path(self._config.db_path).with_suffix(".json.gz"))
+        """Back up everything: catalog, manual edits, cover images and settings.
+
+        The default ``.zip`` format holds every cover, downloading the ones
+        not cached yet first, so a restore on another PC needs no network.
+        ``.json.gz`` writes the catalog and settings only.
+        """
+        stamp = datetime.now().astimezone().date().isoformat()
+        default_name = str(Path(self._config.db_path).parent / f"PlayCache-backup-{stamp}.zip")
         path, _ = QFileDialog.getSaveFileName(
-            self, "Backup Catalog", default_name,
-            "Compressed JSON backup (*.json.gz)",
+            self, "Backup Everything", default_name,
+            "Full backup with covers (*.zip);;Catalog only (*.json.gz)",
         )
         if not path:
             return
+        if not path.lower().endswith((".zip", ".json.gz")):
+            path += ".zip"
+        covers_dir = str(self._image_cache.cache_dir)
+        if is_full_backup(path):
+            self._download_missing_covers(covers_dir)
         try:
-            out = export_backup(self._db, path)
-            QMessageBox.information(
-                self, "Backup created",
-                f"Saved {self._db.count()} games to:\n{out}",
+            out = export_backup(
+                self._db, path, covers_dir=covers_dir,
+                settings=catalog_settings(self._config),
             )
         except (OSError, ValueError) as e:
             QMessageBox.critical(self, "Backup failed", str(e))
+            return
+        if is_full_backup(path):
+            cached, total = count_cached_covers(self._db, covers_dir)
+            detail = f"{self._db.count()} games, {cached} of {total} covers and settings"
+        else:
+            detail = f"{self._db.count()} games and settings (no covers)"
+        QMessageBox.information(self, "Backup created", f"Saved {detail} to:\n{out}")
+
+    def _download_missing_covers(self, covers_dir: str) -> None:
+        urls = missing_covers((r.cover_url for r in self._db.all_records()), covers_dir)
+        if not urls:
+            return
+        import requests
+
+        dialog = QProgressDialog(
+            "Downloading covers for the backup...", "Skip", 0, len(urls), self,
+        )
+        dialog.setWindowTitle("Backup")
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        dialog.setMinimumDuration(0)
+        with requests.Session() as session:
+            for i, url in enumerate(urls):
+                if dialog.wasCanceled():
+                    break
+                dialog.setValue(i)
+                QApplication.processEvents()
+                download_cover(url, covers_dir, session=session)
+        dialog.setValue(len(urls))
 
     def _import_backup(self) -> None:
-        """Restore a catalog from a compressed JSON backup.
+        """Restore from a backup: catalog, covers and settings.
 
         Asks the user whether to merge (upsert by ``folder_path``) or
-        replace the entire catalog with the backup contents.
+        replace the entire catalog with the backup contents. Games whose
+        folder now sits on another drive letter are relinked to it.
         """
         path, _ = QFileDialog.getOpenFileName(
-            self, "Restore Catalog from Backup", "",
-            "Compressed JSON backup (*.json.gz);;All files (*.*)",
+            self, "Restore from Backup", "",
+            "PlayCache backup (*.zip *.json.gz);;All files (*.*)",
         )
         if not path:
             return
@@ -949,17 +993,30 @@ class MainWindow(QMainWindow):
         else:
             replace_all = False
         try:
-            summary = import_backup(self._db, path, replace_all=replace_all)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+            summary = import_backup(
+                self._db, path, replace_all=replace_all,
+                covers_dir=str(self._image_cache.cache_dir),
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError,
+                zipfile.BadZipFile) as e:
             QMessageBox.critical(self, "Restore failed", str(e))
             return
+        settings_note = ""
+        if summary["settings"]:
+            try:
+                applied = restore_catalog_settings(self._config, summary["settings"])
+                settings_note = f"\nSettings restored: {len(applied)}." if applied else ""
+            except OSError as e:
+                settings_note = f"\nSettings not restored: {e}"
         mode = "Replaced" if replace_all else "Merged"
         QMessageBox.information(
             self, "Restore complete",
             f"{mode} {summary['imported']} game(s) "
             f"(format v{summary['format_version']}, "
             f"app v{summary['app_version']}).\n"
-            f"{summary['skipped']} row(s) skipped.",
+            f"Covers restored: {summary['covers']}.\n"
+            f"Paths relinked to this PC's drives: {summary['relinked']}.\n"
+            f"{summary['skipped']} row(s) skipped.{settings_note}",
         )
         self._refresh_table()
         self._update_status_bar()

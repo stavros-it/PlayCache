@@ -201,6 +201,11 @@ class GameRecord:
     # These are preserved across rescans (API data won't overwrite them).
     manual_overrides: str = ""
 
+    # Volume the game lives on (serial / filesystem UUID) and its path inside
+    # it, so the catalog survives drive-letter and mount-point changes.
+    volume_id: str = ""
+    volume_path: str = ""
+
     @cached_property
     def disk(self) -> str:
         """Display name of the disk/drive this game lives on.

@@ -66,7 +66,7 @@ git diff --cached --name-only
 - `config.ini` (contains API keys) — gitignored, local-only
 - `game_library.db` (your catalog) — gitignored, local-only
 - `covers/` (cached cover images) — gitignored, local-only
-- `*.xlsx`, `*.json.gz`, `*.log` — gitignored
+- `*.xlsx`, `*.json.gz`, `PlayCache-backup-*.zip`, `*.log` — gitignored
 
 If any of these appear in `git ls-files`, **do not push** — fix `.gitignore`
 first and `git rm --cached` the file.

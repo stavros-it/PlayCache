@@ -52,9 +52,12 @@ produced in collaboration with AI assistants and reviewed by the author.
    red=error). The "By disk" chart shows **volume labels** (e.g. "TOSHIBA 2TB")
    instead of drive letters. In-bar text color is chosen automatically via WCAG
    luminance (white on dark fills, dark slate on light fills).
-6. Export to Excel anytime. Or **Backup…** (Ctrl+B) to save a compressed
-   JSON snapshot of the entire catalog (`.json.gz`), and **Restore…**
-   (Ctrl+I) to import one — merge (upsert by `folder_path`) or replace-all.
+6. Export to Excel anytime. Or **Backup…** (Ctrl+B) to save everything in
+   one `.zip` (catalog, manual edits, every cover image, non-secret
+   settings; missing covers are downloaded first), and **Restore…** (Ctrl+I)
+   to import one — merge (upsert by `folder_path`) or replace-all. A restore
+   on another PC needs no network: covers come from the zip, and each game
+   is relinked to the drive that now carries its volume.
 7. Click **About** in the toolbar for app info and copyright notice. The status
    bar also shows a permanent "© 2026 Stavros Antoniou" label.
 
@@ -74,11 +77,11 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Storage | SQLite (stdlib `sqlite3`) | Single-file DB; `v_excel` view mirrors the xlsx layout |
 | HTTP | `requests` | Synchronous calls; runs inside background threads |
 | Excel export | `openpyxl` | Matches the 6-column reference Excel layout |
-| Backup format | gzip-compressed JSON (`.json.gz`) | stdlib `gzip` + `json`; versioned envelope |
+| Backup format | zip (`catalog.json` + `covers/`), or gzip JSON (`.json.gz`, catalog only) | stdlib `zipfile` / `gzip` + `json`; versioned envelope (v2) |
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 518 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 549 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -106,7 +109,7 @@ PlayCache/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.9.0"
+│   ├── __init__.py             # version = "1.10.0"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
@@ -122,7 +125,11 @@ PlayCache/
 │   ├── cataloger.py           # scan → fetch → merge → upsert + conflict detection
 │   ├── image_cache.py         # async Qt cover-image fetcher + disk cache
 │   ├── exporter.py            # SQLite → .xlsx matching reference
-│   ├── backup.py              # compressed JSON backup/restore (.json.gz)
+│   ├── backup.py              # full backup (.zip: catalog + covers + settings),
+│   │                          # .json.gz catalog-only, restore with path relinking
+│   ├── volumes.py             # volume serial / filesystem UUID + path inside the
+│   │                          # volume; current roots; drive-letter-independent paths
+│   ├── covers.py              # cover cache file names, missing-cover list, downloads
 │   ├── assets/                # App icon resources
 │   │   ├── app.ico            # multi-resolution (16–256px) Windows icon
 │   │   └── app.png            # 256px PNG (reference / Linux)
@@ -162,12 +169,13 @@ PlayCache/
     ├── test_stats_grid.py            # 3 tests — chart grid overlap regression
     ├── test_post_scan_purge.py       # 9 tests — exact-duplicate purge after scan
     ├── test_backup.py                # 20 tests (atomic write, replace_all atomicity, row validation)
+    ├── test_portable_backup.py       # 31 tests (zip with covers/settings, v1 import, volume relink on restore and rescan, cover downloads, settings restore)
     ├── test_exporter.py              # 10 tests (atomic save, formula injection sanitization)
     ├── test_entry_points.py          # 2 smoke tests (run.py / run.pyw --version)
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~8,230 LOC source + ~6,380 LOC tests = ~14,610 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~8,840 LOC source + ~6,740 LOC tests = ~15,580 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -210,7 +218,7 @@ PlayCache/
 │                       conflict detection)            │           │
 │                                                     ▼           │
 │                  ImageCache ──► QNetworkAccessManager ──► covers/ │
-│    backup.py ──► export_backup / import_backup (.json.gz)        │
+│    backup.py ──► export_backup / import_backup (.zip / .json.gz) │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -467,8 +475,8 @@ $env:QT_QPA_PLATFORM='offscreen'
 python run.pyw
 
 # Backup/restore the catalog programmatically (also available via toolbar)
-python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import export_backup; c=Config(); export_backup(Database(c.db_path), 'catalog_backup.json.gz')"
-python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import import_backup; c=Config(); print(import_backup(Database(c.db_path), 'catalog_backup.json.gz'))"
+python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import export_backup; c=Config(); export_backup(Database(c.db_path), 'backup.zip', covers_dir='covers')"
+python -c "from playcache.config import Config; from playcache.db import Database; from playcache.backup import import_backup; c=Config(); print(import_backup(Database(c.db_path), 'backup.zip', covers_dir='covers'))"
 
 # Build a portable release locally (requires: pip install pyinstaller)
 pyinstaller playcache.spec --noconfirm
@@ -481,6 +489,31 @@ git push --tags
 ```
 
 ## 9. Known limitations & gotchas
+
+- **Drive-letter-independent catalog (2026-11-26, v1.10.0)** — every row
+  stores `volume_id` (Windows volume serial; Linux filesystem UUID, NTFS and
+  FAT/exFAT UUIDs reduced to their last 8 hex digits so the same disk gets
+  the same ID on both systems) and `volume_path` (path inside the volume).
+  A scan that finds an unknown path first looks for a row with the same
+  volume + inner path and **moves** it (`Cataloger._relink`, summary key
+  `relinked`) - no fetch, data and overrides kept. Restore re-points rows
+  whose folder is missing at `volumes.current_roots()`; rows without a
+  volume ID (v1 backups) fall back to "same path on exactly one other drive
+  letter". Rows of a disconnected disk are never touched: matching is by
+  volume ID, not by "path missing". Older rows get their volume ID on the
+  next scan or backup while their folder exists. Network shares (UNC) have
+  no volume ID. Linux ext4 UUIDs cannot match a Windows serial (Windows
+  cannot read ext4 anyway). Folders moved to a different place *inside*
+  the same disk are not relinked (only drive letter / mount changes).
+- **Full backups (2026-11-26, v1.10.0)** — the `.zip` stores covers
+  uncompressed (`ZIP_STORED`, already compressed images); the GUI downloads
+  covers that were never displayed before writing it (progress dialog,
+  "Skip" keeps the rest). Restore only extracts `covers/<name>` where
+  `<name>` is computed from a catalog `cover_url`, so crafted member names
+  cannot write elsewhere; each cover is capped at 32 MB and `catalog.json`
+  at 512 MB. Settings restore writes only `[catalog]` tunables and
+  `skip_folders` (validated types/ranges); API keys and `db_path` are never
+  exported or overwritten.
 
 - **Platform detection (2026-11-26, v1.9.0)** — `platforms.py` decides PC
   vs console vs Android per entry. Content verdicts come from extensions

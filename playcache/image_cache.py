@@ -6,7 +6,6 @@ and are keyed by a hash of the URL so duplicate URLs aren't re-downloaded.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 from pathlib import Path
@@ -15,10 +14,9 @@ from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
+from .covers import cover_file_name
+
 log = logging.getLogger(__name__)
-
-_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp")
-
 
 class ImageCache(QObject):
     """Lazy-loads images from the network with on-disk caching.
@@ -123,14 +121,7 @@ class ImageCache(QObject):
 
     # ------------------------------------------------------------------ #
     def _path_for(self, url: str) -> Path:
-        ext = ""
-        clean = url.rsplit("#", 1)[0].rsplit("?", 1)[0].lower()
-        for suffix in _IMAGE_EXTS:
-            if clean.endswith(suffix):
-                ext = suffix
-                break
-        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
-        return self.cache_dir / f"{digest}{ext}"
+        return self.cache_dir / cover_file_name(url)
 
     def clear(self) -> int:
         """Delete every cached file. Returns the number of files removed.

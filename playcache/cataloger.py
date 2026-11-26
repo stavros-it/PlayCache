@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 
+from . import volumes
 from .config import Config
 from .db import COLUMNS as _COLUMNS
 from .db import Database
@@ -71,7 +72,8 @@ class Cataloger:
 
         summary = {"scanned": total, "processed": 0, "ok": 0,
                    "not_found": 0, "error": 0, "skipped": 0, "stored": 0,
-                   "conflicts": 0}
+                   "conflicts": 0, "relinked": 0}
+        volumes.clear_cache()
 
         rawg_ok = self.rawg.is_available()
         tgdb_ok = self.tgdb.is_available()
@@ -86,12 +88,27 @@ class Cataloger:
                 existing = self.db.get_by_path(record.folder_path)
                 conflict_overrides = None
                 conflict_path_to_delete = None
+                moved_from = ""
+
+                if existing is None and not dry_run:
+                    moved_from = self._relink(record)
+                    if moved_from:
+                        summary["relinked"] += 1
+                        existing = self.db.get_by_path(record.folder_path)
+                elif existing is not None and record.volume_id and (
+                    existing.volume_id != record.volume_id
+                    or existing.volume_path != record.volume_path
+                ):
+                    self.db.set_volume(
+                        record.folder_path, record.volume_id, record.volume_path
+                    )
 
                 if existing and not rescan and only_missing and existing.fetch_status == "ok":
                     record = existing
                     summary["skipped"] += 1
                     if progress:
-                        progress(idx, len(folders), record, "already catalogued")
+                        msg = f"moved from {moved_from}" if moved_from else "already catalogued"
+                        progress(idx, len(folders), record, msg)
                     continue
 
                 if existing is None and conflict_handler and not dry_run:
@@ -229,7 +246,26 @@ class Cataloger:
         return None
 
     # ------------------------------------------------------------------ #
+    def _relink(self, record: GameRecord) -> str:
+        """Re-point a catalogued game whose disk now has another letter/mount.
+
+        Looks for a row stored for the same path inside the same volume (by
+        volume ID). When found, that row's path is updated to the scanned
+        path, keeping its metadata, and the old path is returned.
+        """
+        if not record.volume_id:
+            return ""
+        moved = self.db.find_by_volume(record.volume_id, record.volume_path)
+        if moved is None or moved.folder_path == record.folder_path:
+            return ""
+        if not self.db.move_path(moved.folder_path, record.folder_path, record.folder_name):
+            return ""
+        log.info("Relinked '%s': %s -> %s", moved.game_name, moved.folder_path,
+                 record.folder_path)
+        return moved.folder_path
+
     def _build_record(self, scanned: ScannedFolder) -> GameRecord:
+        volume_id, volume_path = volumes.locate(scanned.folder_path)
         return GameRecord(
             folder_name=scanned.folder_name,
             folder_path=scanned.folder_path,
@@ -237,6 +273,8 @@ class Cataloger:
             platform=scanned.platform,
             store=scanned.store,
             fetch_status="pending",
+            volume_id=volume_id,
+            volume_path=volume_path,
         )
 
     def _fetch(self, record: GameRecord, provider: str = "auto",

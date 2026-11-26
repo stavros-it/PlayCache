@@ -131,3 +131,74 @@ class Config:
                 "and put it in config.ini under [rawg] api_key, "
                 "or set the RAWG_API_KEY environment variable."
             )
+
+
+_INT_SETTINGS = ("request_timeout", "max_retries", "fuzzy_threshold", "description_max_chars")
+
+
+def catalog_settings(cfg: Config) -> dict:
+    """The non-secret ``[catalog]`` settings, as stored in a backup.
+
+    API keys and ``db_path`` are deliberately left out: a backup file is
+    easy to share, and the database location belongs to the target PC.
+    """
+    return {
+        "request_delay": cfg.request_delay,
+        "request_timeout": cfg.request_timeout,
+        "max_retries": cfg.max_retries,
+        "fuzzy_threshold": cfg.fuzzy_threshold,
+        "description_max_chars": cfg.description_max_chars,
+        "skip_folders": list(cfg.skip_folders),
+    }
+
+
+def _valid_settings(values: dict) -> dict:
+    clean: dict = {}
+    delay = values.get("request_delay")
+    if isinstance(delay, (int, float)) and not isinstance(delay, bool) and 0 <= delay <= 60:
+        clean["request_delay"] = float(delay)
+    for key in _INT_SETTINGS:
+        val = values.get(key)
+        if isinstance(val, int) and not isinstance(val, bool) and 0 <= val <= 100_000:
+            clean[key] = val
+    skip = values.get("skip_folders")
+    if isinstance(skip, list) and all(isinstance(s, str) for s in skip):
+        clean["skip_folders"] = tuple(s.strip() for s in skip if s.strip() and "," not in s)
+    return clean
+
+
+def restore_catalog_settings(cfg: Config, values: dict) -> list[str]:
+    """Apply backed-up ``[catalog]`` settings to ``cfg`` and its ini file.
+
+    Invalid values are ignored; API keys and ``db_path`` are never touched.
+    Returns the names of the settings that were applied.
+    """
+    clean = _valid_settings(values if isinstance(values, dict) else {})
+    if not clean:
+        return []
+    path = Path(cfg.config_path) if cfg.config_path else Path.cwd() / "config.ini"
+    parser = ConfigParser()
+    if path.is_file():
+        parser.read(path, encoding="utf-8-sig")
+    if not parser.has_section("catalog"):
+        parser.add_section("catalog")
+    for key, val in clean.items():
+        text = ",".join(val) if key == "skip_folders" else str(val)
+        parser.set("catalog", key, text)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as fh:
+            parser.write(fh)
+        tmp.replace(path)
+    except OSError:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
+    for key, val in clean.items():
+        setattr(cfg, key, val)
+    cfg.config_path = str(path)
+    return list(clean)

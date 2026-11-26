@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS games (
     fetch_status         TEXT,
     fetch_message        TEXT,
     manual_overrides     TEXT    NOT NULL DEFAULT '',
+    volume_id            TEXT    NOT NULL DEFAULT '',
+    volume_path          TEXT    NOT NULL DEFAULT '',
     created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -64,6 +66,7 @@ COLUMNS = [
     "rawg_id", "rawg_slug", "thegamesdb_id", "release_date",
     "developer", "publisher", "metacritic_score", "cover_url", "website",
     "esrb_rating", "data_source", "fetch_status", "fetch_message", "manual_overrides",
+    "volume_id", "volume_path",
 ]
 
 # Columns a user is allowed to edit manually in the GUI (others are read-only).
@@ -131,6 +134,12 @@ class Database:
                 "ALTER TABLE games ADD COLUMN esrb_rating "
                 "TEXT NOT NULL DEFAULT '';"
             )
+        for column in ("volume_id", "volume_path"):
+            if column not in existing:
+                conn.execute(
+                    f"ALTER TABLE games ADD COLUMN {column} TEXT NOT NULL DEFAULT '';"
+                )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_games_volume ON games(volume_id);")
 
     def upsert(self, record: GameRecord) -> bool:
         """Insert a new record or update an existing one keyed by folder_path.
@@ -234,6 +243,45 @@ class Database:
                 "SELECT * FROM games WHERE folder_path = ?;", (folder_path,)
             ).fetchone()
         return GameRecord.from_row(dict(row)) if row else None
+
+    def find_by_volume(self, volume_id: str, volume_path: str) -> GameRecord | None:
+        """Row stored for ``volume_path`` on volume ``volume_id`` (any drive letter)."""
+        if not volume_id:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM games WHERE volume_id = ? AND volume_path = ? "
+                "COLLATE NOCASE ORDER BY updated_at DESC LIMIT 1;",
+                (volume_id, volume_path),
+            ).fetchone()
+        return GameRecord.from_row(dict(row)) if row else None
+
+    def move_path(self, old_path: str, new_path: str, folder_name: str | None = None) -> bool:
+        """Point an existing row at ``new_path``, keeping all of its data.
+
+        Returns False when no row has ``old_path`` or ``new_path`` is taken.
+        """
+        with self.connect() as conn:
+            taken = conn.execute(
+                "SELECT 1 FROM games WHERE folder_path = ?;", (new_path,)
+            ).fetchone()
+            if taken:
+                return False
+            cur = conn.execute(
+                "UPDATE games SET folder_path = ?, "
+                "folder_name = COALESCE(?, folder_name), updated_at = datetime('now') "
+                "WHERE folder_path = ?;",
+                (new_path, folder_name, old_path),
+            )
+            return cur.rowcount > 0
+
+    def set_volume(self, folder_path: str, volume_id: str, volume_path: str) -> None:
+        """Store the volume identity of one row (backfill for older rows)."""
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE games SET volume_id = ?, volume_path = ? WHERE folder_path = ?;",
+                (volume_id, volume_path, folder_path),
+            )
 
     def all_records(self) -> list[GameRecord]:
         with self.connect() as conn:

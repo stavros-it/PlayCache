@@ -18,7 +18,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
-   <img src="https://img.shields.io/badge/tests-518-brightgreen" alt="Tests: 518">
+   <img src="https://img.shields.io/badge/tests-549-brightgreen" alt="Tests: 549">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
 </p>
 
@@ -98,10 +98,13 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
 - **SQLite storage** with a `v_excel` view mirroring the 6-column reference layout
 - **Manual overrides** — user edits persist across rescans (JSON map per row)
 - **Manual game adding** — "Add Game…" (Ctrl+N) for games not currently installed
-- **Backup/Restore** — compressed JSON (`.json.gz`) catalog snapshots with a
-  versioned envelope. Merge (upsert by `folder_path`) or replace-all mode.
-  Forward/backward compatible (unknown columns ignored, missing columns get
-  defaults).
+- **Backup/Restore everything** — one `.zip` holds the whole catalog
+  (metadata, manual edits), every cover image and the non-secret settings.
+  Restoring on another PC needs no network and no re-fetch: covers come from
+  the file, and games are relinked to whatever drive letter or mount point
+  their disk has now (matched by volume serial / filesystem UUID, not by
+  drive letter). Merge (upsert by `folder_path`) or replace-all mode. Older
+  `.json.gz` catalog-only backups still import.
 - **Excel export** with auto-filter
 
 ## Quick start
@@ -194,8 +197,8 @@ later. You can also set keys from the GUI via **Settings…**.
 | **Rescan everything** | Toolbar → **Rescan All** (manual overrides are preserved) |
 | **Find duplicates** | Toolbar → **Find Duplicates…** (Ctrl+D) — fuzzy-matches similar games |
 | **Export to Excel** | Toolbar → **Export to Excel…** (Ctrl+E) → choose a `.xlsx` path |
-| **Back up catalog** | Toolbar → **Backup…** (Ctrl+B) → compressed `.json.gz` snapshot |
-| **Restore catalog** | Toolbar → **Restore…** (Ctrl+I) → merge or replace-all |
+| **Back up everything** | Toolbar → **Backup…** (Ctrl+B) → `.zip` with catalog, covers and settings (`.json.gz` = catalog only) |
+| **Restore / move to a new PC** | Toolbar → **Restore…** (Ctrl+I) → merge or replace-all; covers, settings and drive letters are handled automatically |
 | **View statistics** | Toolbar → **Stats** → metric cards + bar charts |
 | **Open game folder** | Right-click a row → **Open folder in Explorer** (hidden for manual games) |
 | **Delete a game** | Right-click a row → **Delete from catalog…** (folder on disk is untouched) |
@@ -242,17 +245,34 @@ python -c "import sqlite3; c=sqlite3.connect('game_library.db'); [print(r) for r
 
 ## Backup format
 
-Backups use a gzip-compressed JSON envelope (`.json.gz`):
+A full backup is a zip file:
+
+```
+PlayCache-backup-2026-11-26.zip
+  catalog.json        # versioned envelope (below)
+  covers/<hash>.jpg   # cached cover of every game (file name = hash of its URL)
+```
+
+`catalog.json` (also used, gzip-compressed, for catalog-only `.json.gz`
+backups):
 
 ```json
 {
-  "format_version": 1,
-  "app_version": "1.0.0",
-  "exported_at": "2026-08-16T12:34:56+00:00",
+  "format_version": 2,
+  "app_version": "1.10.0",
+  "exported_at": "2026-11-26T12:34:56+00:00",
   "count": 135,
-  "games": [ { "folder_path": "...", "game_name": "...", ... }, ... ]
+  "settings": { "fuzzy_threshold": 60, "skip_folders": ["Windows", "..."] },
+  "games": [ { "folder_path": "I:\\1-RPG\\Doom", "volume_id": "AFE47D23",
+               "volume_path": "1-RPG/Doom", "game_name": "...", ... }, ... ]
 }
 ```
+
+`volume_id` is the disk's volume serial (Windows) / filesystem UUID (Linux,
+reduced to the same 8 hex digits for NTFS/exFAT/FAT), `volume_path` the
+game's path inside that disk. On restore, a row whose folder is missing is
+re-pointed at the drive that now carries that volume. API keys and `db_path`
+are never written to a backup.
 
 The format is versioned for forward/backward compatibility — a backup from an
 older version imports cleanly into a newer one (missing columns get dataclass
@@ -276,7 +296,9 @@ playcache/
   cataloger.py            # scan → fetch → merge → upsert orchestrator
   image_cache.py          # async Qt cover-image fetcher with disk cache
   exporter.py             # SQLite → .xlsx (6-column reference layout)
-  backup.py               # compressed JSON backup/restore (.json.gz)
+  backup.py               # full backup (.zip: catalog + covers + settings) / restore
+  volumes.py              # volume serial / UUID + path inside the volume
+  covers.py               # cover cache file names and downloads
   assets/                 # app.ico (multi-resolution) + app.png
   gui/                    # PySide6 GUI package
     theme.py              # centralized dark palette + DARK_QSS + contrast_text()
@@ -304,8 +326,9 @@ The tests use mocked API responses (no network) and cover: name cleaning,
 smart game-name detection, store/platform detection (consoles, Android, disc headers), dedupe, recursive container
 descent, DB upserts, TheGamesDB + RAWG response parsing, the merge step,
 the rescan/skip logic, manual override persistence, schema migration, the
-Excel round-trip, and compressed JSON backup/restore (round-trip, merge,
-replace-all, bad envelopes, corrupt gzip, legacy/missing columns).
+Excel round-trip, and backup/restore (round-trip, merge, replace-all, bad
+envelopes, corrupt gzip, legacy/missing columns, covers and settings in zip
+backups, relinking to a new drive letter on restore and on rescan).
 
 ## Linting
 

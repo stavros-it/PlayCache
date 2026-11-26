@@ -284,6 +284,7 @@ class ScanDialog(QDialog):
             f"Errors          : {summary.get('error', 0)}",
             f"Skipped         : {summary.get('skipped', 0)}",
             f"Disk conflicts  : {summary.get('conflicts', 0)}",
+            f"Relinked (moved): {summary.get('relinked', 0)}",
             f"Stored in DB    : {summary.get('stored', 0)}",
         ]
         self.log_view.append("\n".join(lines))

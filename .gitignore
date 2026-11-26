@@ -18,6 +18,7 @@ AppDir/
 *.db-journal
 *.log
 *.json.gz
+PlayCache-backup-*.zip
 config.ini
 !config.example.ini
 

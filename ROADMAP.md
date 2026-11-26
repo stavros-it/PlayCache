@@ -6,7 +6,7 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.9.0)
+## Current state (v1.10.0)
 
 - ✅ Game detection without false positives or duplicates (2026-11-26) —
   folders are classified as container / game / grouping / no evidence;
@@ -51,6 +51,12 @@
 - ✅ App icon (custom multi-resolution `.ico`) in window title, taskbar, Alt-Tab
 - ✅ Async cover-image loading with disk cache
 - ✅ Excel export, settings dialog, context menu (re-fetch / open folder / delete)
+- ✅ Backup everything + move to a new PC (2026-11-26) — "Backup…" writes a
+  `.zip` with the catalog, every cover image and the non-secret settings;
+  "Restore…" brings all of it back without any provider request, and games
+  follow their disk to a new drive letter / mount point (volume serial or
+  filesystem UUID stored per row). Rescans relink moved disks instead of
+  re-fetching.
 - ✅ Backup/Restore — compressed JSON (`.json.gz`) catalog snapshots. "Backup…"
   (Ctrl+B) exports the full catalog with a versioned envelope
   (`format_version`, `app_version`, `exported_at`, `count`). "Restore…"
@@ -326,6 +332,51 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-11-26 — Full backups and drive-letter-independent restore (v1.10.0)
+
+**Trigger**: the user moves the catalog to another PC. The `.json.gz`
+backup held no images (covers were re-downloaded on view), and rows were
+keyed by absolute path, so a disk that came up as `E:` instead of `I:` made
+every game "new" on the next scan and fetched it again from RAWG /
+TheGamesDB. The user asked for a backup that exports everything and a
+restore that relies neither on drive letters nor on the providers.
+
+**Changes**:
+- New `playcache/volumes.py`: `locate(path)` -> `(volume_id, volume_path)`
+  (Windows `GetVolumeInformationW` serial; Linux `/dev/disk/by-uuid` of the
+  mount's device, normalised so NTFS/exFAT/FAT match Windows),
+  `current_roots()`, `resolve()`, `swap_drive_letter()` fallback.
+- DB: columns `volume_id`, `volume_path` (+ index, migration for existing
+  DBs); `find_by_volume`, `move_path`, `set_volume`.
+- `cataloger.py`: new records carry their volume; an unknown path that
+  matches a stored volume + inner path moves that row (`relinked` in the
+  summary and the scan dialog) and is skipped like any catalogued game;
+  existing rows get their volume backfilled.
+- `backup.py`: format v2. `.zip` = `catalog.json` + `covers/`; `.json.gz`
+  = catalog only. Envelope adds `settings`. Export backfills volume IDs;
+  import relinks missing paths, restores covers into the cover cache and
+  returns the settings. v1 backups import unchanged.
+- New `playcache/covers.py` (cover file naming shared with `ImageCache`,
+  missing-cover list, downloads). `config.py`: `catalog_settings()` /
+  `restore_catalog_settings()`.
+- GUI: "Backup…" defaults to `PlayCache-backup-<date>.zip`, downloads
+  missing covers first, reports games/covers; "Restore…" accepts `.zip` and
+  `.json.gz`, applies settings, reports covers restored and paths relinked.
+- Verified on drive `I:`: 267 games scanned, all with volume IDs; a backup
+  with every path rewritten to `Z:` restored with 267 relinked to `I:` and
+  data intact; a rescan against `Z:` rows relinked all 267 with zero
+  provider calls and no duplicates.
+- Tests: 518 -> 549 (`test_portable_backup.py`).
+
+**Trade-offs**: matching by volume ID instead of "path is missing" keeps
+the multi-disk use case safe: a catalogued disk that is merely unplugged is
+never merged into another disk with the same folder layout. Volume-less
+rows (old backups) relink only when exactly one other drive letter has the
+same path. Folders moved inside one disk are not followed. API keys are
+left out of backups on purpose (backup files are easy to share); they must
+be entered again on the new PC. Zip chosen over base64-in-JSON to avoid
+loading every cover into memory and the 33% size overhead.
 
 ### 2026-11-26 — Release v1.9.0
 
