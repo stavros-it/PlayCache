@@ -333,6 +333,13 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-11-26 — Release v1.10.0
+
+Version 1.10.0 adds full backups (catalog + covers + settings in one
+`.zip`) and drive-letter-independent restore/rescan via per-row volume IDs.
+Tag `v1.10.0` triggers the release workflow (Windows portable zip
+`PlayCache-v1.10.0-windows-portable.zip` + Linux AppImage).
+
 ### 2026-11-26 — Full backups and drive-letter-independent restore (v1.10.0)
 
 **Trigger**: the user moves the catalog to another PC. The `.json.gz`
