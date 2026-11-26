@@ -327,6 +327,13 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-11-26 — Release v1.9.0
+
+Version 1.9.0 covers the scanner rewrite (no false positives, same-platform
+dedupe, platform detection from content, path and archive names) and the
+Platform filter. Tag `v1.9.0` triggers the release workflow (Windows
+portable zip `PlayCache-v1.9.0-windows-portable.zip` + Linux AppImage).
+
 ### 2026-11-26 — Platform from archive names (.7z / .rar)
 
 **Trigger**: `.7z`/`.rar` archives got their platform from folder names only,
