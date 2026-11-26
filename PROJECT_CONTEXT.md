@@ -347,6 +347,8 @@ PlayCache/
 | `fetch_status` | `str` | `"ok"`, `"not_found"`, `"error"`, `"skipped"`, `"pending"` |
 | `fetch_message` | `str` | Error / debug context |
 | `manual_overrides` | `str` | JSON: `{"user_rating": "10/10", ...}` |
+| `volume_id` | `str` | Volume serial (Windows) / filesystem UUID (Linux), normalised; `""` for manual entries, network shares, rows not rescanned since v1.10.0 |
+| `volume_path` | `str` | Path inside that volume, `/`-separated (e.g. `1-RPG/Doom`) |
 
 **Computed properties** (not stored in DB — derived from other fields):
 
@@ -357,14 +359,15 @@ PlayCache/
 
 ### SQLite schema (`db.py`)
 
-- **Table `games`**: 24 columns. `folder_path` is `UNIQUE` (upsert key).
-  `manual_overrides TEXT NOT NULL DEFAULT ''`, `esrb_rating TEXT NOT NULL
-  DEFAULT ''`. `created_at` / `updated_at` timestamps.
-- **Indexes**: `game_name`, `fetch_status`, `store`.
+- **Table `games`**: 26 columns. `folder_path` is `UNIQUE` (upsert key).
+  `manual_overrides`, `esrb_rating`, `volume_id`, `volume_path` are
+  `TEXT NOT NULL DEFAULT ''`. `created_at` / `updated_at` timestamps.
+- **Indexes**: `game_name`, `fetch_status`, `store`, `volume_id`.
 - **View `v_excel`**: reproduces the 6 Excel columns exactly, ordered by name.
 - **Migration**: `_migrate()` adds new columns to pre-existing DBs — currently
-  handles `manual_overrides` and `esrb_rating` additions (both with
-  `NOT NULL DEFAULT ''` so old rows get empty strings, not NULL).
+  handles `manual_overrides`, `esrb_rating`, `volume_id` and `volume_path`
+  additions (all `NOT NULL DEFAULT ''` so old rows get empty strings, not
+  NULL) and creates the `volume_id` index.
 - **Editable columns** (`EDITABLE_COLUMNS`): `game_name`, `platform`, `store`,
   `user_rating`, `game_type`, `short_description`, `release_date`, `developer`,
   `publisher`, `website`. Everything else is read-only in the GUI.
@@ -424,7 +427,7 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 495 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 548 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
 - **Platform labels** live in `playcache/platforms.py` (`ALL_PLATFORMS`).
   PC variants keep the reference-sheet spelling (`PC`, `PC (Linux)`,

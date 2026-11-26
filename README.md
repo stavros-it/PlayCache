@@ -117,6 +117,10 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
    - **Linux**: `PlayCache-vX.Y.Z-linux-x86_64.AppImage` — `chmod +x` and run
 3. On first launch, `config.ini` is auto-created from the bundled example.
    Edit it and paste your free RAWG API key.
+4. The app is portable: `config.ini`, the catalog database and the
+   `covers/` cache live in the folder you start it from. To move to another
+   PC, use **Backup…** there and **Restore…** on the new PC (see
+   [Backup format](#backup-format)); API keys are not part of the backup.
 
 ### Option B: Run from source
 
@@ -206,7 +210,9 @@ later. You can also set keys from the GUI via **Settings…**.
 
 Scans run in a background thread with live progress, so the UI stays
 responsive. Cover images are downloaded lazily and cached on disk under
-`<db_dir>/covers/`.
+`<db_dir>/covers/`. A disk that comes back under another drive letter or
+mount point is recognised by its volume ID on the next scan: its games are
+relinked to the new paths instead of being fetched again.
 
 ## How matching works
 
@@ -235,7 +241,8 @@ the API value (use the DB API directly if you need finer control — see
 Table `games` stores the 6 catalogue columns plus metadata for re-fetching and
 auditing (`rawg_id`, `thegamesdb_id`, `release_date`, `developer`,
 `publisher`, `metacritic_score`, `cover_url`, `esrb_rating`, `data_source`,
-`fetch_status`, `fetch_message`, `manual_overrides`, timestamps). The view
+`fetch_status`, `fetch_message`, `manual_overrides`, `volume_id` /
+`volume_path` (disk identity + path inside the disk), timestamps). The view
 `v_excel` reproduces the Excel layout exactly and is what **Export to Excel**
 reads. Inspect with any SQLite tool:
 
@@ -313,7 +320,7 @@ playcache/
     duplicates_dialog.py  # fuzzy duplicate finder + resolver
 run.pyw                   # GUI entry point (no console, maximized)
 run.py                    # Console entry point (same app, maximized)
-tests/                    # pytest suite (496 tests)
+tests/                    # pytest suite (549 tests)
 ```
 
 ## Testing
