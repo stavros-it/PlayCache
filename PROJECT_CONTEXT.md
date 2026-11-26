@@ -167,7 +167,7 @@ PlayCache/
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~8,230 LOC source + ~6,370 LOC tests = ~14,600 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~8,230 LOC source + ~6,380 LOC tests = ~14,610 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
