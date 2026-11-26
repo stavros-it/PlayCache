@@ -127,6 +127,11 @@ _FAN_PORT_PHRASES = frozenset({
     "decompilations",
 })
 
+_PC_BUILD_TOKENS = frozenset({"windows", "win32", "win64", "x64", "pc"})
+_SCENE_TAGS: dict[str, str] = {
+    "psv": "PS VITA", "xboxone": "XBOX ONE", "ps2dvd": "PS2", "ps3dvd": "PS3",
+}
+
 ALL_PLATFORMS: tuple[str, ...] = (
     PC, PC_LINUX, PC_FAN_PORT, PC_MOD, *sorted(_SYSTEM_ALIASES),
     *sorted({p for p in ROM_EXTENSIONS.values()} - set(_SYSTEM_ALIASES)), CONSOLE,
@@ -188,23 +193,103 @@ def _path_segments(path: str) -> list[str]:
     return [s for s in rest.split("/") if s and not re.fullmatch(r"[A-Za-z]:", s)]
 
 
+def _own_hint(seg: str) -> str | None:
+    for tag in re.findall(r"[\[(]([^\])]+)[\])]", seg):
+        for part in re.split(r"[,;/]", tag):
+            hint = _segment_hint(part)
+            if hint and hint != CONSOLE:
+                return hint
+    return _segment_hint(_strip_extension(seg))
+
+
+def _strip_extension(seg: str) -> str:
+    return re.sub(r"\.[A-Za-z0-9]{1,5}$", "", seg)
+
+
+def name_hint(name: str) -> str | None:
+    """Platform named inside a game's file or folder name.
+
+    ``Kirby-Windows-x64.7z`` is PC; ``GAMECUBE Super Mario Sunshine.7z`` and
+    ``Super.Mario.Odyssey.NSW-GRP.rar`` name a console. Region tags such as
+    ``(USA)`` say nothing: Redump names PC discs the same way. Returns
+    ``None`` when the name says nothing.
+    """
+    stem = _strip_extension(name.strip())
+    tokens = {t for t in re.split(r"[\s._\-()\[\]+,]+", stem.lower()) if t}
+    if tokens & _PC_BUILD_TOKENS:
+        return PC
+    prefix = _SYSTEM_PREFIX_RE.match(stem)
+    if prefix:
+        system = _ALIAS_TO_SYSTEM.get(prefix.group(1).lower())
+        if system:
+            return system
+    scene = _scene_platform(stem)
+    if scene:
+        return scene[0]
+    return None
+
+
+_SYSTEM_PREFIX_RE = re.compile(r"^([A-Z0-9]{2,}(?: (?:U|360|ONE|VITA|CD))?)[\s_-]+(?=\S{2})")
+_SCENE_RE = re.compile(r"^(\S+\.\S+)-[A-Za-z0-9]+$")
+_SCENE_REGION_TOKENS = frozenset({"pal", "ntsc", "usa", "eur", "jpn", "multi", "multi5"})
+
+
+def _scene_platform(stem: str) -> tuple[str, str] | None:
+    m = _SCENE_RE.match(stem)
+    if not m:
+        return None
+    parts = m.group(1).split(".")
+    last = parts[-1].lower()
+    system = _ALIAS_TO_SYSTEM.get(last) or _SCENE_TAGS.get(last)
+    if not system or len(parts) < 2:
+        return None
+    parts = parts[:-1]
+    while len(parts) > 1 and parts[-1].lower() in _SCENE_REGION_TOKENS:
+        parts = parts[:-1]
+    return system, ".".join(parts)
+
+
+def strip_system_tags(stem: str) -> str:
+    """Remove the system tags :func:`name_hint` reads from a name.
+
+    ``N64 Zelda`` -> ``Zelda``; ``Super.Mario.Odyssey.NSW-GRP`` ->
+    ``Super.Mario.Odyssey``; anything else is returned unchanged.
+    """
+    m = _SYSTEM_PREFIX_RE.match(stem)
+    if m and m.group(1).lower() in _ALIAS_TO_SYSTEM:
+        return stem[m.end():]
+    scene = _scene_platform(stem)
+    if scene:
+        return scene[1]
+    return stem
+
+
 def path_hint(path: str) -> str | None:
-    """Platform implied by the path's folder names, nearest segment first.
+    """Platform implied by the path, nearest segment first.
 
     Bracketed tags in a segment (``God of War [PS2]``) are checked before the
-    segment itself. Returns ``None`` when no segment names a platform.
+    segment itself. When the nearest segment names no system outright, its
+    name is read with :func:`name_hint`; a console named there does not beat
+    a ports or mods folder above it (``1-RECOMPILATIONS/N64 Zelda.7z`` is a
+    PC port of an N64 game). Returns ``None`` when nothing names a platform.
     """
-    for seg in reversed(_path_segments(path)):
-        for tag in re.findall(r"[\[(]([^\])]+)[\])]", seg):
-            for part in re.split(r"[,;/]", tag):
-                hint = _segment_hint(part)
-                if hint and hint != CONSOLE:
-                    return hint
-        stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", seg)
-        hint = _segment_hint(stem)
-        if hint:
-            return hint
-    return None
+    segments = _path_segments(path)
+    if not segments:
+        return None
+    own = _own_hint(segments[-1])
+    if own:
+        return own
+    outer: str | None = None
+    for seg in reversed(segments[:-1]):
+        outer = _own_hint(seg)
+        if outer:
+            break
+    named = name_hint(segments[-1])
+    if named is None:
+        return outer
+    if outer in (PC_FAN_PORT, PC_MOD):
+        return outer
+    return named
 
 
 def detect_platform(path: str) -> str:

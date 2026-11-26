@@ -19,6 +19,10 @@
   Xbox, PS1/PS2/PSP/PS3), zip member lists, and system-named folders
   (`PS2`, `[Switch]`, `1-Linux Games`, `1-PORTS`, `EMU`). Folders holding a
   second platform's build yield one entry per platform.
+- ✅ Platform from archive names (2026-11-26) — `.7z`/`.rar` (and any
+  entry) named `GAMECUBE Title`, `Title.NSW-GROUP` or `Title-Windows-x64`
+  gets that platform without reading the archive; ports/mods folders still
+  win over the named console.
 - ✅ Platform filter (2026-11-26) — Platform combo in the left panel next to
   Store/Status/Genre, data-driven; Find Duplicates, the post-scan purge and
   the cross-disk conflict prompt only match games on the same platform.
@@ -323,6 +327,39 @@ The functional core is solid; these make the app feel professional.
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
 
+### 2026-11-26 — Platform from archive names (.7z / .rar)
+
+**Trigger**: `.7z`/`.rar` archives got their platform from folder names only,
+so `D:\Games\GAMECUBE Super Mario Sunshine.7z` or
+`Super.Mario.Odyssey.NSW-GRP.rar` came out as `PC`. The user asked for the
+platform to come from the archive name, not its contents.
+
+**Changes**:
+- `platforms.py`: new `name_hint(name)` reads a file or folder name: PC
+  build words (`Windows`, `Win32`, `Win64`, `x64`, `PC`) -> `PC`; an
+  upper-case system prefix (`GAMECUBE`, `PS1`, `N64`, `XBOX 360`, `WII U`)
+  or a scene platform tag before the group (`.NSW-`, `.PS2DVD-`, `.PSV-`,
+  region words such as `PAL` skipped) -> that system. `path_hint` uses it
+  for the nearest path segment when no folder names a system outright; a
+  console named there loses to a ports/mods folder above it.
+  `strip_system_tags()` removes the same tags from titles (the scanner's
+  `_strip_system_prefix` now delegates to it, adding `XBOX 360 Halo 3` ->
+  `Halo 3` and scene suffix removal).
+- `folder_scanner.py`: an archive inside a game folder whose contents are
+  unknown now contributes its name verdict instead of always weak PC
+  (`_archive_name_verdict`), so `Super Mario Odyssey/Super.Mario.Odyssey.NSW-GRP.rar`
+  is `SWITCH`.
+- Tests: 496 -> 518.
+
+**Trade-offs**: no archive contents are read (no 7z/rar parser, no new
+dependency, no extra disk reads). Region tags (`(USA)`, `(Europe)
+(En,Fr,De)`) were tried as a console signal and dropped: Redump names PC
+discs the same way, and the `I:` scan turned `Unreal (USA) (Rev 2)` into
+`CONSOLE`. Lower-case prefixes are ignored so titles such as `Wii Sports
+Club` and `Genesis Noir` stay unhinted. The `I:` scan is unchanged (its
+system-prefixed archives all sit under `1-RECOMPILATIONS`, already
+`PC (Fan Port)`).
+
 ### 2026-11-26 — Scanner rewrite: no false positives, same-platform dedupe, platform detection, Platform filter (v1.9.0)
 
 **Trigger**: a scan of the real `I:` drive (2 TB, genre buckets such as
@@ -365,7 +402,8 @@ across platforms.
   empty folders being games now hold a `game.exe`.
 
 **Trade-offs**: `.7z`/`.rar` contents are not read (no new dependency), so a
-console ROM archive needs a system-named folder or ends up `PC`/`CONSOLE`.
+console ROM archive needs a system-named folder or ends up `PC`/`CONSOLE`
+(archive names are read since the follow-up entry above).
 Path hints include folders above the scan root by design (scanning
 `E:\PS2` should know it is PS2). Dedupe keys drop edition words like GOTY /
 Deluxe / Complete, so two different products differing only by those words

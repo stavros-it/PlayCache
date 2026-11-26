@@ -1232,6 +1232,47 @@ class TestDedupe:
         assert [k.folder_path for k in kept] == ["/y/Hollow Knight", "/z/hk.apk"]
 
 
+class TestArchiveNamePlatform:
+    def test_loose_archives_named_after_a_system(self, tmp_path):
+        _files(
+            tmp_path / "Downloads",
+            "GAMECUBE Super Mario Sunshine.7z",
+            "Super.Mario.Odyssey.NSW-GRP.rar",
+            "Unreal (USA) (Rev 2).7z",
+            "Slime.Rancher.v1.4.4.rar",
+        )
+        results = sorted((r.cleaned_name, r.platform) for r in _scan(tmp_path, recursive=True))
+        assert results == [
+            ("Slime Rancher", "PC"),
+            ("Super Mario Odyssey", "SWITCH"),
+            ("Super Mario Sunshine", "GAMECUBE"),
+            ("Unreal", "PC"),
+        ]
+
+    def test_system_prefix_inside_ports_folder_is_a_pc_port(self, tmp_path):
+        _files(
+            tmp_path / "1-RECOMPILATIONS",
+            "N64 Ship of Harkinian.7z",
+            "3DS Kirby-Triple-Deluxe-Windows-x64.7z",
+        )
+        results = sorted((r.cleaned_name, r.platform) for r in _scan(tmp_path, recursive=True))
+        assert results == [
+            ("Kirby Triple Deluxe", "PC (Fan Port)"),
+            ("Ship of Harkinian", "PC (Fan Port)"),
+        ]
+
+    def test_archive_in_game_folder_sets_its_platform(self, tmp_path):
+        _files(tmp_path / "Super Mario Odyssey", "Super.Mario.Odyssey.NSW-GRP.rar")
+        _files(tmp_path / "Halo", "Halo-Windows-x64.7z")
+        results = sorted((r.cleaned_name, r.platform) for r in _scan(tmp_path))
+        assert results == [("Halo", "PC"), ("Super Mario Odyssey", "SWITCH")]
+
+    def test_system_named_archive_in_ports_game_folder(self, tmp_path):
+        _files(tmp_path / "1-PORTS" / "Zelda", "N64 Zelda.7z")
+        results = [(r.cleaned_name, r.platform) for r in _scan(tmp_path, recursive=True)]
+        assert results == [("Zelda", "PC (Fan Port)")]
+
+
 class TestPlatformVariants:
     def test_windows_and_sh_installers_yield_two_entries(self, tmp_path):
         _files(

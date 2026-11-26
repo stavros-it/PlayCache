@@ -55,6 +55,51 @@ class TestPathHint:
         assert plat.detect_platform("D:/Games/Hollow Knight") == plat.PC
 
 
+class TestNameHint:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("GAMECUBE Super Mario Sunshine.7z", "GAMECUBE"),
+            ("PS1 Tekken3 Remake.rar", "PS1"),
+            ("XBOX 360 Halo 3.7z", "XBOX 360"),
+            ("Super.Mario.Odyssey.NSW-GRP.rar", plat.SWITCH),
+            ("God.of.War.PAL.PS2DVD-GRP.rar", "PS2"),
+            ("Kirby-Triple-Deluxe-Windows-x64.7z", plat.PC),
+            ("3DS Kirby-Windows-x64.7z", plat.PC),
+        ],
+    )
+    def test_names_that_say_a_platform(self, name, expected):
+        assert plat.name_hint(name) == expected
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "Wii Sports Club Remake.7z", "Genesis Noir.rar", "Slime.Rancher.v1.4.4.rar",
+            "Only.Up-GRP.rar", "Hollow Knight.zip", "Doom 2016.7z",
+            "Zelda (Europe) (En,Fr,De).7z", "Unreal (USA) (Rev 2)",
+        ],
+    )
+    def test_names_that_say_nothing(self, name):
+        assert plat.name_hint(name) is None
+
+    def test_ports_folder_beats_system_in_name(self):
+        assert plat.path_hint("I:/1-RECOMPILATIONS/GAMECUBE Super Mario Sunshine.7z") == (
+            plat.PC_FAN_PORT
+        )
+        assert plat.path_hint("I:/1-PORTS/Zelda (Europe) (En,Fr).7z") == plat.PC_FAN_PORT
+
+    def test_system_in_name_beats_plain_folders(self):
+        assert plat.path_hint("D:/Games/GAMECUBE Super Mario Sunshine.7z") == "GAMECUBE"
+        assert plat.path_hint("D:/PS2/God of War (USA).7z") == "PS2"
+        assert plat.path_hint("I:/EMU Redump/Super Mario Sunshine.7z") == plat.CONSOLE
+
+    def test_strip_system_tags(self):
+        assert plat.strip_system_tags("N64 Zelda") == "Zelda"
+        assert plat.strip_system_tags("XBOX 360 Halo 3") == "Halo 3"
+        assert plat.strip_system_tags("God.of.War.PAL.PS2DVD-GRP") == "God.of.War"
+        assert plat.strip_system_tags("Wii Sports") == "Wii Sports"
+
+
 class TestResolve:
     def test_pc_content_beats_console_path(self):
         assert plat.resolve(plat.PC, "C:/Xbox Games/Halo") == plat.PC

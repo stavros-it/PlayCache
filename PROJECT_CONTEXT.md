@@ -78,7 +78,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 496 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 518 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -113,8 +113,9 @@ PlayCache/
 │   ├── folder_scanner.py      # folder classification (container / game / grouping /
 │   │                          # no evidence), smart name detection, loose archives,
 │   │                          # installers, dumps and APKs as entries, same-platform dedupe
-│   ├── platforms.py           # PC vs console vs Android: path hints, ROM/APK
-│   │                          # extensions, disc-header sniffing, zip member peeking
+│   ├── platforms.py           # PC vs console vs Android: path hints, file-name
+│   │                          # system tags, ROM/APK extensions, disc-header
+│   │                          # sniffing, zip member peeking
 │   ├── textutils.py           # HTML strip, truncate, ratings, fuzzy match
 │   ├── rawg_client.py         # RAWG API client — primary source
 │   ├── thegamesdb_client.py   # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
@@ -141,8 +142,8 @@ PlayCache/
 └── tests/                     # pytest suite
     ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture + autouse fixture that closes/deletes top-level widgets after every test
     ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
-    ├── test_folder_scanner.py        # 185 tests (smart detection, archives, installers, category folders, dedupe, platform variants)
-    ├── test_platforms.py             # 60 tests (path hints, extensions, disc headers, zip peeking, combine/resolve)
+    ├── test_folder_scanner.py        # 189 tests (smart detection, archives, installers, category folders, dedupe, platform variants, archive-name platforms)
+    ├── test_platforms.py             # 78 tests (path hints, name hints, extensions, disc headers, zip peeking, combine/resolve)
     ├── test_platform_duplicates.py   # 12 tests (platform-aware purge / Find Duplicates / conflicts / TGDB, Platform filter)
     ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
@@ -166,7 +167,7 @@ PlayCache/
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~8,135 LOC source + ~6,290 LOC tests = ~14,425 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~8,230 LOC source + ~6,370 LOC tests = ~14,600 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -237,7 +238,13 @@ PlayCache/
    (ROM/APK extensions, GameCube/Wii/Saturn/Dreamcast/Xbox headers, ISO9660
    system IDs incl. PS1/PS2/PSP/PS3, zip member lists), then the nearest
    folder name that names a system (`PS2`, `Nintendo GameCube`, `[Switch]`,
-   `1-Linux Games`, `1-PORTS`, `EMU Redump` -> `CONSOLE`), else `PC`. Strong
+   `1-Linux Games`, `1-PORTS`, `EMU Redump` -> `CONSOLE`), else `PC`. The
+   entry's own file or folder name is read too (`name_hint`): an upper-case
+   system prefix (`GAMECUBE Super Mario Sunshine.7z`), a scene platform tag
+   (`Super.Mario.Odyssey.NSW-GRP.rar`) or a PC build word (`Windows`, `x64`,
+   `Win64`, `PC`); a console named there loses to a ports/mods folder above
+   it (`1-RECOMPILATIONS/N64 Zelda.7z` is a PC port), and the tags are
+   stripped from the title. Strong
    PC content (executables, repack parts) beats a console folder name. A
    game folder that also holds a build for another platform (GOG Linux
    `.sh` next to a Windows installer, an `.apk`, a console dump) yields one
@@ -480,8 +487,14 @@ git push --tags
   (`.nsp`/`.xci` -> `SWITCH`, `.sfc` -> `SNES`, `.apk` -> `ANDROID`, `.chd` ->
   `CONSOLE`, ...), disc headers read from the first ~40 KB (plus a few
   seeks for Xbox and PS2 `SYSTEM.CNF`), and zip member names (no
-  extraction). `.7z`/`.rar` contents are never read, so their platform comes
-  from folder names only; an unreadable or empty archive counts as weak PC.
+  extraction). `.7z`/`.rar` contents are never read: their platform comes
+  from the archive's own name (system prefix, scene tag, `Windows`/`x64`
+  build words) and then the folder names; an archive whose name says
+  nothing, or an unreadable/empty one, counts as weak PC. Region tags like
+  `(USA)` / `(Europe)` are deliberately not a console signal - Redump names
+  PC discs the same way (`Unreal (USA) (Rev 2)`). A system prefix only
+  counts in upper case (`GAMECUBE Zelda`, `PS2 God of War`), so titles like
+  `Wii Sports` or `Genesis Noir` are not hints.
   Path hints use **every** folder in the absolute path, including folders
   above the scan root - a parent named `Linux`, `PS2` or `EMU` affects all
   games below it (nearest folder wins). Console words are matched as whole

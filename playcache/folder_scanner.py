@@ -740,8 +740,19 @@ def _content_verdict(f: Path, level: int) -> str | None:
         return None
     verdict = _plat.file_content(f, peek=peek)
     if verdict is None and _is_archive(f) and not _is_multipart_continuation(f):
-        return _plat.WEAK_PC
+        return _archive_name_verdict(f)
     return verdict
+
+
+def _archive_name_verdict(f: Path) -> str:
+    named = _plat.name_hint(f.name)
+    if named is None:
+        return _plat.WEAK_PC
+    if named == _plat.PC:
+        return named
+    if _plat.path_hint(str(f.parent)) in (_plat.PC_FAN_PORT, _plat.PC_MOD):
+        return _plat.WEAK_PC
+    return named
 
 
 def _folder_platform(path: Path) -> str:
@@ -1282,11 +1293,8 @@ def _clean_archive_name(filename: str) -> str:
 
 
 def _strip_system_prefix(stem: str) -> str:
-    """Drop a leading upper-case system tag: ``N64 Zelda`` -> ``Zelda``."""
-    m = re.match(r"^([A-Z0-9]{2,})[\s_-]+(?=\S)", stem)
-    if m and (m.group(1).lower() in _plat._ALIAS_TO_SYSTEM) and len(stem) > m.end() + 2:
-        return stem[m.end():]
-    return stem
+    """Drop system tags: ``N64 Zelda`` -> ``Zelda``, ``Halo.Wii-GRP`` -> ``Halo``."""
+    return _plat.strip_system_tags(stem)
 
 
 def _squash(name: str) -> str:

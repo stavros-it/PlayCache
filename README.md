@@ -18,7 +18,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
-   <img src="https://img.shields.io/badge/tests-496-brightgreen" alt="Tests: 496">
+   <img src="https://img.shields.io/badge/tests-518-brightgreen" alt="Tests: 518">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
 </p>
 
@@ -77,8 +77,10 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   inline-editable fields
 - **Platform detection** — PC, PC (Linux), PC (Fan Port), Android and
   consoles (Switch, PS1/PS2/PSP/PS3, GameCube, Wii, N64, SNES, ...) from file
-  contents (ROM/APK extensions, disc headers, zip contents) and folder names
-  (`PS2`, `[Switch]`, `Linux Games`, `EMU`). A folder holding builds for
+  contents (ROM/APK extensions, disc headers, zip contents), archive names
+  (`GAMECUBE Super Mario Sunshine.7z`, `Game.NSW-GROUP.rar`,
+  `Game-Windows-x64.7z`) and folder names (`PS2`, `[Switch]`, `Linux Games`,
+  `EMU`). A folder holding builds for
   several platforms yields one entry per platform.
 - **No false positives, no duplicates** — genre/category folders are
   descended instead of catalogued, folders without game files are skipped,
