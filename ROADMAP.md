@@ -6,8 +6,22 @@
 >
 > Status legend: **🔍 exploring** · **📋 planned** · **🚧 in progress** · **✅ done**
 
-## Current state (v1.8.0)
+## Current state (v1.9.0)
 
+- ✅ Game detection without false positives or duplicates (2026-11-26) —
+  folders are classified as container / game / grouping / no evidence;
+  category folders holding a single loose zip or a single game subfolder no
+  longer become one fake game; empty and non-game folders are skipped;
+  same title + same platform entries are collapsed (other platforms kept).
+  Verified on the real `I:` drive: 195 mostly-merged rows -> 265 real games.
+- ✅ Platform detection from content and path (2026-11-26) — ROM/APK
+  extensions, disc headers (GameCube, Wii, Saturn, Dreamcast, Sega CD,
+  Xbox, PS1/PS2/PSP/PS3), zip member lists, and system-named folders
+  (`PS2`, `[Switch]`, `1-Linux Games`, `1-PORTS`, `EMU`). Folders holding a
+  second platform's build yield one entry per platform.
+- ✅ Platform filter (2026-11-26) — Platform combo in the left panel next to
+  Store/Status/Genre, data-driven; Find Duplicates, the post-scan purge and
+  the cross-disk conflict prompt only match games on the same platform.
 - ✅ Switch dump detection (2026-11-20) — folders holding `.nsp`/`.nsz`/`.xci`/`.xcz`
   files are catalogued with platform `SWITCH`
 - ✅ PySide6 GUI with sortable/filterable table, detail panel, scan dialog
@@ -308,6 +322,56 @@ The functional core is solid; these make the app feel professional.
 
 A chronological record of significant product decisions. Add new entries at
 the top so the most recent context is first.
+
+### 2026-11-26 — Scanner rewrite: no false positives, same-platform dedupe, platform detection, Platform filter (v1.9.0)
+
+**Trigger**: a scan of the real `I:` drive (2 TB, genre buckets such as
+`000Kidz/`, `1-FPS/`, `1-RPG/`, `1-PORTS/`, `EMU Redump/`, plus
+`1-GOG Games/`) produced 195 rows, many wrong: every bucket holding one loose
+zip was catalogued as a single game named after the bucket (`000Kidz` hid 25
+games), single-subfolder buckets (`1-PORTS`) became games, `Unreal` was
+dropped as an "engine" junk word, the same game appeared 2-3 times (repack
+folder + scene folder + loose archive), GOG DLC/patch installers named the
+base game, goodies zips (avatars, artbooks, novellas) became games, and
+everything not Switch was `PC`. The user also asked for a Platform filter
+next to Search/Store/Status/Genre and for duplicates to be allowed only
+across platforms.
+
+**Changes**:
+- New `playcache/platforms.py`: content verdicts (ROM/APK extensions, disc
+  header sniffing, zip member peeking, ELF on Linux), path hints from
+  system-named folders, `resolve()` priority (strong PC content > console
+  content > path hint > weak PC > PC) and `ALL_PLATFORMS` labels.
+- `folder_scanner.py`: `_classify()` replaces `_is_grouping_folder`
+  (strong markers, foreign evidence subfolders, package markers, loose-file
+  clusters keyed by GOG build ID or title, numeric-sequel detection, GOG
+  install-step subfolders); evidence required before a folder is
+  catalogued; loose ROMs/APKs/disc images and `.tar*` archives become
+  entries; per-platform variant entries; `dedupe_games()` with source
+  ranking; per-scan listing cache (`os.scandir`). Naming: largest GOG
+  installer set wins, patch/DLC installers ignored, human-typed folder
+  names weigh 0.88, `_polish_title` strips `(64bit)`, hotfix/patch/update
+  tails, `tm` residue and upper-cases Roman numerals; `clean_folder_name`
+  moves trailing articles, splits multi-hyphen words, strips site suffixes,
+  long numeric IDs, `ALL DLCs`, machine-name versions, and keeps scene-tag
+  words that appear mid-title; engine names are no longer junk titles.
+- `db.purge_exact_duplicates`, `DuplicatesDialog._group_duplicates` and
+  `Cataloger._find_conflict` group by platform; TheGamesDB only fills an
+  empty or `CONSOLE` platform.
+- GUI: Platform filter combo (data-driven, selection preserved); Add Game
+  platform list uses `ALL_PLATFORMS`.
+- Tests: 385 -> 496 (new `test_platforms.py`, `test_platform_duplicates.py`,
+  drive-layout scenarios in `test_folder_scanner.py`); fixtures that relied on
+  empty folders being games now hold a `game.exe`.
+
+**Trade-offs**: `.7z`/`.rar` contents are not read (no new dependency), so a
+console ROM archive needs a system-named folder or ends up `PC`/`CONSOLE`.
+Path hints include folders above the scan root by design (scanning
+`E:\PS2` should know it is PS2). Dedupe keys drop edition words like GOTY /
+Deluxe / Complete, so two different products differing only by those words
+collapse on one platform; `Enhanced` / `Remastered` / `Special` stay
+distinct. A warm rescan of `I:` takes ~0.4 s; a cold first scan is bounded
+by disk seeks for zip directories and disc headers.
 
 ### 2026-11-25 — Roadmap audit
 

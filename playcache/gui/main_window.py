@@ -32,6 +32,7 @@ from ..db import Database
 from ..exporter import export_xlsx
 from ..image_cache import ImageCache
 from ..models import GameRecord
+from ..platforms import ALL_PLATFORMS
 from .about_dialog import AboutDialog
 from .detail_panel import DetailPanel
 from .duplicates_dialog import DuplicatesDialog
@@ -58,6 +59,7 @@ class GamesProxyModel(QSortFilterProxyModel):
         super().__init__(parent)
         self._search = ""
         self._store = "All"
+        self._platform = "All"
         self._status = "All"
         self._genre = "All"
 
@@ -67,6 +69,10 @@ class GamesProxyModel(QSortFilterProxyModel):
 
     def set_store(self, store: str) -> None:
         self._store = store
+        self.invalidate()
+
+    def set_platform(self, platform: str) -> None:
+        self._platform = platform
         self.invalidate()
 
     def set_status(self, status: str) -> None:
@@ -87,6 +93,8 @@ class GamesProxyModel(QSortFilterProxyModel):
         if self._search and self._search not in (rec.game_name or "").lower():
             return False
         if self._store != "All" and (rec.store or "Other") != self._store:
+            return False
+        if self._platform != "All" and (rec.platform or "PC") != self._platform:
             return False
         if self._genre != "All" and self._genre.strip().lower() not in {
             g.strip().lower() for g in (rec.game_type or "").split("/") if g.strip()
@@ -329,6 +337,12 @@ class MainWindow(QMainWindow):
         self.store_combo.currentTextChanged.connect(self._proxy.set_store)
         f_layout.addWidget(self.store_combo)
 
+        f_layout.addWidget(QLabel("Platform"))
+        self.platform_combo = QComboBox()
+        self.platform_combo.addItems(["All"])
+        self.platform_combo.currentTextChanged.connect(self._proxy.set_platform)
+        f_layout.addWidget(self.platform_combo)
+
         f_layout.addWidget(QLabel("Status"))
         self.status_combo = QComboBox()
         self.status_combo.addItems(["All", "ok", "not_found", "error", "pending"])
@@ -398,7 +412,27 @@ class MainWindow(QMainWindow):
         self._model.set_records(records)
         self._auto_resize_columns()
         self._refresh_store_filter(records)
+        self._refresh_platform_filter(records)
         self._refresh_genre_filter(records)
+
+    def _refresh_platform_filter(self, records: list[GameRecord]) -> None:
+        """Rebuild the Platform filter combo from the catalog's platforms.
+
+        Empty platforms count as "PC" (matching the Excel view and
+        ``filterAcceptsRow``). The current selection is preserved while it
+        still exists in the data.
+        """
+        current = self.platform_combo.currentText()
+        items = ["All", *sorted({rec.platform or "PC" for rec in records}, key=str.lower)]
+        self.platform_combo.blockSignals(True)
+        self.platform_combo.clear()
+        self.platform_combo.addItems(items)
+        if current in items:
+            self.platform_combo.setCurrentText(current)
+        else:
+            self.platform_combo.setCurrentIndex(0)
+        self.platform_combo.blockSignals(False)
+        self._proxy.set_platform(self.platform_combo.currentText())
 
     def _refresh_store_filter(self, records: list[GameRecord]) -> None:
         """Rebuild the Store filter combo from the catalog's actual values.
@@ -568,7 +602,7 @@ class MainWindow(QMainWindow):
         form.addRow("Game name:", name_edit)
 
         platform_combo = QComboBox()
-        platform_combo.addItems(["PC", "PC (Linux)", "PC (Fan Port)", "PC (Mod)"])
+        platform_combo.addItems(list(ALL_PLATFORMS))
         form.addRow("Platform:", platform_combo)
 
         store_combo = QComboBox()

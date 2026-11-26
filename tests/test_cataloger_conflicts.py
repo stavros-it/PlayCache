@@ -100,6 +100,7 @@ def test_conflict_prompted_for_new_folder_on_another_disk(two_disks, tmp_path):
     d_path = str(root_d / "Hollow Knight")
     db.upsert(_hk_row(d_path))
     (root_e / "Hollow Knight").mkdir()
+    ((root_e / "Hollow Knight") / "game.exe").write_bytes(b"x")
 
     calls: list[tuple[str, str]] = []
 
@@ -124,6 +125,7 @@ def test_conflict_new_replaces_old_row_and_migrates_overrides(two_disks, tmp_pat
     db.upsert(_hk_row(d_path))
     db.set_field(d_path, "user_rating", "10/10")
     (root_e / "Hollow Knight").mkdir()
+    ((root_e / "Hollow Knight") / "game.exe").write_bytes(b"x")
 
     summary = cat.scan_to_db(str(root_e), conflict_handler=lambda n, o: "new")
 
@@ -145,6 +147,7 @@ def test_conflict_old_stores_nothing(two_disks, tmp_path):
     d_path = str(root_d / "Hollow Knight")
     db.upsert(_hk_row(d_path, user_rating="8/10"))
     (root_e / "Hollow Knight").mkdir()
+    ((root_e / "Hollow Knight") / "game.exe").write_bytes(b"x")
 
     summary = cat.scan_to_db(str(root_e), conflict_handler=lambda n, o: "old")
 
@@ -166,6 +169,7 @@ def test_conflict_both_keeps_both_rows(two_disks, tmp_path):
     d_path = str(root_d / "Hollow Knight")
     db.upsert(_hk_row(d_path, user_rating="8/10"))
     (root_e / "Hollow Knight").mkdir()
+    ((root_e / "Hollow Knight") / "game.exe").write_bytes(b"x")
 
     summary = cat.scan_to_db(str(root_e), conflict_handler=lambda n, o: "both")
 
@@ -186,6 +190,7 @@ def test_no_conflict_prompt_when_folder_path_already_in_db(two_disks, tmp_path):
     root_d, root_e = two_disks
     _cfg, db, cat = _make_cataloger(tmp_path)
     (root_d / "Hollow Knight").mkdir()
+    ((root_d / "Hollow Knight") / "game.exe").write_bytes(b"x")
     d_path = str((root_d / "Hollow Knight").resolve())
     e_path = str((root_e / "Hollow Knight").resolve())
     db.upsert(_hk_row(d_path))
@@ -211,6 +216,7 @@ def test_no_conflict_prompt_on_rescan_of_same_path(two_disks, tmp_path):
     root_d, root_e = two_disks
     _cfg, db, cat = _make_cataloger(tmp_path)
     (root_d / "Hollow Knight").mkdir()
+    ((root_d / "Hollow Knight") / "game.exe").write_bytes(b"x")
     d_path = str((root_d / "Hollow Knight").resolve())
     e_path = str((root_e / "Hollow Knight").resolve())
     db.upsert(_hk_row(d_path))

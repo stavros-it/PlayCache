@@ -137,6 +137,7 @@ class TestCatalogerRespectsOverrides:
         # Create a real game folder so the scanner finds it
         game_dir = tmp_path / "Hollow Knight"
         game_dir.mkdir()
+        (game_dir / "game.exe").write_bytes(b"x")
 
         # First scan: seed the DB with API data
         cat.scan_to_db(str(tmp_path))

@@ -205,7 +205,7 @@ class Cataloger:
         return summary
 
     def _find_conflict(self, record: GameRecord) -> GameRecord | None:
-        """Find an existing DB entry with the same game name on a different disk.
+        """Find an existing DB entry with the same game name and platform on a different disk.
 
         Returns the conflicting record (to prompt the user) or ``None``.
         Uses case-insensitive name comparison and ignores the path's own entry.
@@ -217,9 +217,12 @@ class Cataloger:
         name = (record.game_name or record.folder_name).strip().lower()
         if not name:
             return None
+        platform = (record.platform or "PC").strip().lower()
         for rec in self.db.all_records():
             if rec.folder_path == record.folder_path:
                 continue  # same entry (update, not conflict)
+            if (rec.platform or "PC").strip().lower() != platform:
+                continue
             other_name = (rec.game_name or rec.folder_name).strip().lower()
             if other_name == name and rec.disk != record.disk:
                 return rec

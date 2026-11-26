@@ -195,9 +195,12 @@ class DuplicatesDialog(QDialog):
             return {}
 
         uf = _UnionFind(len(items))
+        platforms = [(rec.platform or "PC").strip().lower() for rec, _n in items]
         # O(n^2) pairwise comparison — fine for typical catalog sizes (<2k)
         for i in range(len(items)):
             for j in range(i + 1, len(items)):
+                if platforms[i] != platforms[j]:
+                    continue
                 if _is_duplicate_pair(items[i][1], items[j][1]):
                     uf.union(i, j)
 

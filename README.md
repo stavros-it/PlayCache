@@ -18,7 +18,7 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/PySide6-6.11-green" alt="PySide6 6.11">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blueviolet" alt="Platform: Windows | Linux">
-   <img src="https://img.shields.io/badge/tests-385-brightgreen" alt="Tests: 385">
+   <img src="https://img.shields.io/badge/tests-496-brightgreen" alt="Tests: 496">
   <img src="https://img.shields.io/badge/license-proprietary-lightgrey" alt="License: Proprietary">
 </p>
 
@@ -75,8 +75,15 @@ a statistics dashboard. Runs on <strong>Windows</strong> and <strong>Linux</stro
   alphabetical sort by default, custom sort keys for date and rating columns
 - **Detail panel** — cover image, all metadata, YouTube gameplay search,
   inline-editable fields
-- **Switch dump detection** — a game folder containing `.nsp`, `.nsz`, `.xci`
-  or `.xcz` files (up to 2 levels deep) is catalogued with platform `SWITCH`
+- **Platform detection** — PC, PC (Linux), PC (Fan Port), Android and
+  consoles (Switch, PS1/PS2/PSP/PS3, GameCube, Wii, N64, SNES, ...) from file
+  contents (ROM/APK extensions, disc headers, zip contents) and folder names
+  (`PS2`, `[Switch]`, `Linux Games`, `EMU`). A folder holding builds for
+  several platforms yields one entry per platform.
+- **No false positives, no duplicates** — genre/category folders are
+  descended instead of catalogued, folders without game files are skipped,
+  and the same game found twice on the same platform (repack + scene copy +
+  archive) is catalogued once. Copies on other platforms are kept.
 - **Multi-row selection** with bulk re-fetch and bulk delete
 - **Stats dialog** — metric cards (totals + completeness) and bar charts
   (by status, source, platform, store, ESRB, disk, release year). The "By disk"
@@ -178,7 +185,7 @@ later. You can also set keys from the GUI via **Settings…**.
 |--------|-----|
 | **Scan a drive** | Toolbar → **Scan Drive…** → pick a drive/folder, set options, **Start Scan** |
 | **Add a game manually** | Toolbar → **Add Game…** (Ctrl+N) — no folder required |
-| **Filter the table** | Type in the **Search** box, pick a **Store** or **Status** from the dropdowns |
+| **Filter the table** | Type in the **Search** box, pick a **Store**, **Platform**, **Status** or **Genre** from the dropdowns |
 | **View a game's details** | Click a row → cover image, metadata, and editable fields appear on the right |
 | **Edit a field** | Change a value in the detail panel → **Save Changes** (persists as a manual override) |
 | **Re-fetch a game** | Right-click a row → **Re-fetch metadata**, or use the button in the detail panel |
@@ -259,7 +266,8 @@ playcache/
   config.py               # loads config.ini / env vars (PLAYCACHE_*)
   models.py               # GameRecord dataclass + computed disk/release props
   db.py                   # SQLite schema, upsert, v_excel view, overrides, stats
-  folder_scanner.py       # drive parsing, smart name detection, store/platform
+  folder_scanner.py       # folder classification, smart name detection, dedupe
+  platforms.py            # PC / console / Android detection (content + path)
   textutils.py            # HTML strip, truncation, rating format, fuzzy match
   rawg_client.py          # RAWG API client — primary source
   thegamesdb_client.py    # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
@@ -281,7 +289,7 @@ playcache/
     duplicates_dialog.py  # fuzzy duplicate finder + resolver
 run.pyw                   # GUI entry point (no console, maximized)
 run.py                    # Console entry point (same app, maximized)
-tests/                    # pytest suite (385 tests)
+tests/                    # pytest suite (496 tests)
 ```
 
 ## Testing
@@ -291,7 +299,7 @@ python -m pytest tests/ -q
 ```
 
 The tests use mocked API responses (no network) and cover: name cleaning,
-smart game-name detection, store/platform detection (incl. Switch dumps), recursive container
+smart game-name detection, store/platform detection (consoles, Android, disc headers), dedupe, recursive container
 descent, DB upserts, TheGamesDB + RAWG response parsing, the merge step,
 the rescan/skip logic, manual override persistence, schema migration, the
 Excel round-trip, and compressed JSON backup/restore (round-trip, merge,

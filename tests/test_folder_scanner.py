@@ -373,20 +373,21 @@ class TestSwitchDumpPlatform:
         assert _make_scanned(g, store="").platform == "PC"
 
 
+def _game_dir(path: Path, exe: str = "game.exe") -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / exe).write_bytes(b"x")
+    return path
+
+
 class TestScanGames:
     def _make_tree(self, tmp: Path):
-        (tmp / "Hollow Knight").mkdir()
-        (tmp / "Deep Rock Galactic").mkdir()
+        _game_dir(tmp / "Hollow Knight")
+        _game_dir(tmp / "Deep Rock Galactic")
         (tmp / "Windows").mkdir()
         (tmp / "$Recycle.Bin").mkdir()
-        # A steam library root
         steam = tmp / "SteamLibrary" / "steamapps" / "common"
-        steam.mkdir(parents=True)
-        (steam / "Dead Cells").mkdir()
-        # A GOG library root
-        gog = tmp / "GOG Games"
-        gog.mkdir()
-        (gog / "Biomutant").mkdir()
+        _game_dir(steam / "Dead Cells")
+        _game_dir(tmp / "GOG Games" / "Biomutant")
 
     def test_scan_immediate_children(self, tmp_path):
         self._make_tree(tmp_path)
@@ -407,7 +408,7 @@ class TestScanGames:
         assert results["Hollow Knight"].store == ""
 
     def test_cleaned_name_used(self, tmp_path):
-        (tmp_path / f"Hollow Knight [{TAG.title()}]").mkdir()
+        _game_dir(tmp_path / f"Hollow Knight [{TAG.title()}]")
         (tmp_path / "Windows").mkdir()
         results = list(scan_games(str(tmp_path)))
         hk = next(r for r in results if "Hollow" in r.folder_name)
@@ -435,7 +436,7 @@ class TestScanGames:
 
     def test_gog_folder_noise_stripped(self, tmp_path):
         """GOG noise tokens (gog, windows, ID parens) are stripped from folder names."""
-        (tmp_path / "aphelion_windows_gog_(90803)").mkdir()
+        _game_dir(tmp_path / "aphelion_windows_gog_(90803)")
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
         assert "aphelion" in results[0].cleaned_name.lower()
@@ -689,8 +690,7 @@ class TestArchiveScanning:
         assert [r.folder_name for r in results] == ["Hollow Knight.zip"]
 
     def test_game_folder_with_data_zip_keeps_folder(self, tmp_path):
-        folder = tmp_path / "Hollow Knight"
-        folder.mkdir()
+        folder = _game_dir(tmp_path / "Hollow Knight")
         (folder / "saves.zip").write_text("x")
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
@@ -733,7 +733,7 @@ class TestSourceTagSuffixes:
         out = clean_folder_name(
             "Legend of Zelda, The - Twilight Princess (Europe) (En,Fr,De,Es,It)"
         )
-        assert out == "Legend of Zelda The Twilight Princess"
+        assert out == "The Legend of Zelda Twilight Princess"
 
 
 class TestSourceArchiveNames:
@@ -814,7 +814,7 @@ class TestArchiveFolderResolution:
         (folder / f"{base}-2.bin").write_text("x")
         results = list(scan_games(str(tmp_path)))
         assert len(results) == 1
-        assert results[0].cleaned_name == "Spongebob Squarepants Titans Of The Tide"
+        assert results[0].cleaned_name == "SpongeBob Squarepants Titans of the Tide"
 
     def test_unreal_bin_cue_folder(self, tmp_path):
         folder = tmp_path / "Unreal (USA) (Rev 2)"
@@ -842,7 +842,7 @@ class TestRecursiveSkip:
     def test_recursive_branch_honors_skip(self, tmp_path):
         holder = tmp_path / "MyLib"
         holder.mkdir()
-        (holder / "PrivateFolder").mkdir()
+        _game_dir(holder / "PrivateFolder")
         found = [r.folder_name for r in scan_games(str(tmp_path), recursive=True)]
         assert found == ["PrivateFolder"]
         skipped = list(scan_games(str(tmp_path), recursive=True, skip={"privatefolder"}))
@@ -874,7 +874,7 @@ class TestGogSetupNumberTokens:
 
 class TestUnicodeNames:
     def test_unicode_folder_name_preserved(self, tmp_path):
-        (tmp_path / "Παιχνίδια").mkdir()
+        _game_dir(tmp_path / "Παιχνίδια")
         results = list(scan_games(str(tmp_path)))
         assert [r.cleaned_name for r in results] == ["Παιχνίδια"]
 
@@ -956,7 +956,7 @@ class TestGroupingFolderDescent:
     def test_grouping_folder_with_installers_descends(self, tmp_path):
         grouping = tmp_path / "1-ARCADE"
         grouping.mkdir()
-        (grouping / "Tetris Forever").mkdir()
+        _game_dir(grouping / "Tetris Forever")
         (grouping / "setup_mortal_kombat_2_2.0.0.2.exe").write_text("x")
         (grouping / "setup_pinball_dreams_2.1.0.20.exe").write_text("x")
         names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
@@ -965,8 +965,8 @@ class TestGroupingFolderDescent:
     def test_grouping_descends_without_recursive_flag(self, tmp_path):
         holder = tmp_path / "1-MY"
         holder.mkdir()
-        (holder / "Torchlight 2").mkdir()
-        (holder / "Talisman").mkdir()
+        _game_dir(holder / "Torchlight 2")
+        _game_dir(holder / "Talisman")
         names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
         assert names == ["Talisman", "Torchlight 2"]
 
@@ -975,10 +975,10 @@ class TestGroupingFolderDescent:
         outer.mkdir()
         inner = outer / "1-INDIE"
         inner.mkdir()
-        (inner / "Hollow Knight Silksong").mkdir()
+        _game_dir(inner / "Hollow Knight Silksong")
         (inner / "setup_hollow_knight_1.5_(50885).exe").write_text("x")
         (inner / "setup_steamworld_dig_2.1.0.3.exe").write_text("x")
-        (outer / "Biomutant").mkdir()
+        _game_dir(outer / "Biomutant")
         (outer / "setup_aquanox_1.18_(19599).exe").write_text("x")
         (outer / "setup_gex_2.0.0.5.exe").write_text("x")
         names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
@@ -1011,17 +1011,18 @@ class TestGroupingFolderDescent:
     def test_grouping_multivolume_setup_dedupe(self, tmp_path):
         grouping = tmp_path / "1-FPS"
         grouping.mkdir()
-        (grouping / "Far Cry").mkdir()
+        _game_dir(grouping / "Far Cry")
         (grouping / "setup_farcry_1.0_(1).exe").write_text("x")
         (grouping / "setup_farcry_1.0_(1)-1.bin").write_text("x")
         (grouping / "setup_gex_2.0.0.5.exe").write_text("x")
-        names = sorted(r.cleaned_name for r in scan_games(str(tmp_path)))
-        assert names == ["Far Cry", "Farcry", "Gex"]
+        results = list(scan_games(str(tmp_path)))
+        assert sorted(r.cleaned_name for r in results) == ["Far Cry", "Gex"]
+        far_cry = next(r for r in results if r.cleaned_name == "Far Cry")
+        assert far_cry.folder_name == "Far Cry"
 
     def test_numbered_library_root_is_container(self, tmp_path):
         lib = tmp_path / "1-GOG Games"
-        lib.mkdir()
-        (lib / "Biomutant").mkdir()
+        _game_dir(lib / "Biomutant")
         results = list(scan_games(str(tmp_path)))
         assert [r.cleaned_name for r in results] == ["Biomutant"]
         assert results[0].store == "GOG"
@@ -1050,3 +1051,308 @@ class TestGroupingFolderDescent:
         assert _clean_gog_setup_name(
             "setup_metal_slug_4_1.0_(70018).exe"
         ) == "Metal Slug 4"
+
+
+def _files(folder: Path, *names: str) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in names:
+        (folder / n).write_bytes(b"x")
+    return folder
+
+
+def _repack(folder: Path) -> Path:
+    _files(folder, "fg-01.bin", "fg-02.bin", "setup.exe")
+    _files(folder / "MD5", "QuickSFV.EXE", "bins.md5")
+    return folder
+
+
+def _scan(root: Path, **kw) -> list:
+    return list(scan_games(str(root), **kw))
+
+
+class TestCategoryFolders:
+    def test_category_with_loose_archive_and_game_subfolders(self, tmp_path):
+        kidz = tmp_path / "000Kidz"
+        _repack(kidz / f"Cuphead [{TAG.title()} Repack]")
+        _files(kidz / f"Hello.Neighbor-{GRP.upper()}", f"{GRP}-hello.neighbor.iso", f"{GRP}.nfo")
+        _files(kidz, "Another Princess is in our Castle v0.3.3.zip", "Slime.Rancher.v1.4.4.rar")
+        results = _scan(tmp_path)
+        names = sorted(r.cleaned_name for r in results)
+        assert names == ["Another Princess is in our Castle", "Cuphead", "Hello Neighbor", "Slime Rancher"]
+        assert "000Kidz" not in {r.folder_name for r in results}
+
+    def test_category_with_single_subfolder(self, tmp_path):
+        ports = tmp_path / "1-PORTS"
+        _files(
+            ports / "Legend of Zelda, The - Twilight Princess",
+            "Dusk-win32-x86_64.zip",
+            "Legend of Zelda, The - Twilight Princess (Europe) (En,Fr,De,Es,It).7z",
+        )
+        results = _scan(tmp_path)
+        assert [r.folder_name for r in results] == ["Legend of Zelda, The - Twilight Princess"]
+        assert results[0].cleaned_name == "The Legend of Zelda Twilight Princess"
+        assert results[0].platform == "PC (Fan Port)"
+
+    def test_category_with_one_loose_zip_and_repacks(self, tmp_path):
+        fps = tmp_path / "1-FPS"
+        _repack(fps / f"Atomic Heart [{TAG2.title()} Repack]")
+        _repack(fps / f"Half-Life - Alyx [{TAG.title()} Repack]")
+        _files(fps, "Journey.to.the.SP.v1.0.10.ALL.DLC.zip")
+        names = sorted(r.cleaned_name for r in _scan(tmp_path))
+        assert names == ["Atomic Heart", "Half-Life Alyx", "Journey to the SP"]
+
+    def test_folders_without_game_files_are_skipped(self, tmp_path):
+        (tmp_path / "Empty Folder").mkdir()
+        _files(tmp_path / "Music", "song.mp3", "cover.jpg")
+        _files(tmp_path / "Docs", "readme.txt", "manual.pdf")
+        _files(tmp_path / "Real Game", "RealGame.exe")
+        assert [r.cleaned_name for r in _scan(tmp_path)] == ["Real Game"]
+
+    def test_extras_subfolders_never_become_games(self, tmp_path):
+        game = _files(tmp_path / "Some Game", "setup_some_game_1.0_(123).exe")
+        _files(game / "DLC", "setup_some_game_soundtrack_1.0_(123).exe")
+        _files(game / "Crack", "SomeGame.exe")
+        _files(game / "Bonus", "artbook.zip")
+        assert [r.folder_name for r in _scan(tmp_path)] == ["Some Game"]
+
+    def test_gog_install_steps_in_subfolders_are_one_game(self, tmp_path):
+        game = tmp_path / "The Elder Scrolls V Skyrim Special Edition"
+        _files(game / "1-Install Base", "setup_skyrim_se_1.0_(70738).exe", "setup_skyrim_se_1.0_(70738)-1.bin")
+        _files(game / "3-Ann Upd", "setup_skyrim_anniversary_upgrade_1.0_(70738).exe")
+        results = _scan(tmp_path)
+        assert [r.folder_name for r in results] == ["The Elder Scrolls V Skyrim Special Edition"]
+
+    def test_gog_goodies_zips_do_not_split_the_folder(self, tmp_path):
+        game = _files(
+            tmp_path / "baldurs_gate_2_enhanced_edition_2.6.6.0_win_gog_20240210",
+            "setup_baldurs_gate_ii_enhanced_edition_2.6.6.0_(64bit)_(46870).exe",
+            "baldurs_gate_2_avatars.zip",
+            "baldurs_gate_2_ee_mastering_melee_and_magic.zip",
+        )
+        results = _scan(tmp_path)
+        assert [r.folder_name for r in results] == [game.name]
+        assert results[0].cleaned_name == "Baldurs Gate II Enhanced Edition"
+
+    def test_different_games_in_one_folder_are_split(self, tmp_path):
+        _files(
+            tmp_path / "Steamworld",
+            "gog_steamworld_dig_2.0.0.7.sh",
+            "steamworld_dig_2_en_1_1_15062.sh",
+            "steamworld_heist_2_1_26995.sh",
+        )
+        names = sorted(r.cleaned_name for r in _scan(tmp_path))
+        assert names == ["Steamworld Dig", "Steamworld Dig 2", "Steamworld Heist"]
+
+    def test_numbered_sequels_next_to_base_game_are_split(self, tmp_path):
+        _files(tmp_path / "Metal Slug", "Metal Slug.zip", "Metal Slug 2.zip", "Metal Slug X.zip")
+        names = sorted(r.cleaned_name for r in _scan(tmp_path))
+        assert names == ["Metal Slug", "Metal Slug 2", "Metal Slug X"]
+
+    def test_variants_of_one_game_stay_one_folder(self, tmp_path):
+        _files(
+            tmp_path / "Red Alert 2",
+            "Red Alert 2.7z",
+            "Command & Conquer Red Alert II Portable.zip",
+            "Command-And-Conquer-Red-Alert-2-Yuris-Revenge.zip",
+        )
+        assert [r.folder_name for r in _scan(tmp_path)] == ["Red Alert 2"]
+
+    def test_gog_main_installer_is_largest(self, tmp_path):
+        folder = tmp_path / "titan_quest_anniversary_edition"
+        folder.mkdir()
+        (folder / "setup_titan_quest_-_anniversary_edition_2.10.6_(59562).exe").write_bytes(b"x" * 5000)
+        (folder / "setup_titan_quest_-_anniversary_edition_2.10.6_(59562)-1.bin").write_bytes(b"x" * 9000)
+        (folder / "setup_titan_quest_atlantis_2.10.6_(59562).exe").write_bytes(b"x" * 3000)
+        (folder / "setup_titan_quest_ragnarok_2.10.6_(59562).exe").write_bytes(b"x" * 3000)
+        results = _scan(tmp_path)
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Titan Quest Anniversary Edition"
+
+    def test_human_folder_name_beats_abbreviated_installer(self, tmp_path):
+        _files(tmp_path / "Star Wars Dark Forces", "setup_sw_dark_forces_2.0.0.1.exe")
+        assert [r.cleaned_name for r in _scan(tmp_path)] == ["Star Wars Dark Forces"]
+
+    def test_patch_only_installer_does_not_name_folder(self, tmp_path):
+        _files(
+            tmp_path / "torment_tides_of_numenera_1.1.0_win_gog_20240130",
+            "setup_torment_-_tides_of_numenera_1.1.0_-_servant_of_the_tides_content_update_patch_(12012).exe",
+            "torment_tides_of_numenera_manual.zip",
+            "torment_tides_of_numenera_world_map.zip",
+        )
+        assert [r.cleaned_name for r in _scan(tmp_path)] == ["Torment Tides Of Numenera"]
+
+
+class TestDedupe:
+    def test_same_game_same_platform_collapsed(self, tmp_path):
+        _repack(tmp_path / f"Netherworld Covenant [{TAG.title()} Repack]")
+        _files(
+            tmp_path / f"Netherworld.Covenant-{TAG2.upper()}",
+            f"{TAG2}-netherworld.covenant.iso",
+            f"{TAG2}.nfo",
+        )
+        results = _scan(tmp_path)
+        assert len(results) == 1
+        assert results[0].cleaned_name == "Netherworld Covenant"
+
+    def test_installed_copy_beats_archive(self, tmp_path):
+        _files(tmp_path / "Only UP (2023)" / "Only UP", "OnlyUP.exe")
+        _files(tmp_path / "Downloads", f"Only.Up-{GRP.upper()}.rar", "Celeste.zip")
+        results = {r.cleaned_name: r for r in _scan(tmp_path)}
+        assert sorted(results) == ["Celeste", "Only UP"]
+        assert results["Only UP"].folder_name == "Only UP (2023)"
+        assert results["Only UP"].source == "folder"
+
+    def test_store_filled_from_dropped_copy(self, tmp_path):
+        _files(tmp_path / "Hollow Knight", "hollow_knight.exe")
+        _files(tmp_path / "GOG Games", "setup_hollow_knight_1.5_(50885).exe")
+        results = _scan(tmp_path)
+        assert len(results) == 1
+        assert results[0].folder_name == "Hollow Knight"
+        assert results[0].store == "GOG"
+
+    def test_other_platforms_are_kept(self, tmp_path):
+        _files(tmp_path / "Linux Games", "gog_metal_slug_2.0.0.2.sh")
+        _files(tmp_path / "Installers", "setup_metal_slug_gog-3_(12273).exe", "setup_gex_2.0.0.5.exe")
+        results = sorted((r.cleaned_name, r.platform) for r in _scan(tmp_path))
+        assert results == [("Gex", "PC"), ("Metal Slug", "PC"), ("Metal Slug", "PC (Linux)")]
+
+    def test_dedupe_can_be_disabled(self, tmp_path):
+        _files(tmp_path / "A", "Hollow Knight.zip")
+        _files(tmp_path / "B", "Hollow.Knight.v1.0.1.rar")
+        assert len(_scan(tmp_path)) == 1
+        assert len(_scan(tmp_path, dedupe=False)) == 2
+
+    def test_dedupe_games_ranks_sources(self):
+        from playcache.folder_scanner import ScannedFolder, dedupe_games
+
+        archive = ScannedFolder("hk.zip", "/x/hk.zip", "Hollow Knight", "PC", "", False, "archive")
+        folder = ScannedFolder("Hollow Knight", "/y/Hollow Knight", "Hollow Knight", "PC", "", False, "installed")
+        android = ScannedFolder("hk.apk", "/z/hk.apk", "Hollow Knight", "ANDROID", "", False, "rom")
+        kept = dedupe_games([archive, folder, android])
+        assert [k.folder_path for k in kept] == ["/y/Hollow Knight", "/z/hk.apk"]
+
+
+class TestPlatformVariants:
+    def test_windows_and_sh_installers_yield_two_entries(self, tmp_path):
+        _files(
+            tmp_path / "Torchlight 2 GOG",
+            "setup_torchlight_2_1.25.9.5b_(23102).exe",
+            "gog_torchlight_2_2.0.0.2.sh",
+        )
+        results = sorted((r.cleaned_name, r.platform) for r in _scan(tmp_path))
+        assert results == [("Torchlight 2", "PC"), ("Torchlight 2", "PC (Linux)")]
+
+    def test_apk_next_to_pc_game(self, tmp_path):
+        _files(tmp_path / "HOMM3 complete gog", "VCMI-Windows.exe", "VCMI-Android-arm64-v8a.apk")
+        results = sorted((r.platform, r.folder_name) for r in _scan(tmp_path))
+        assert results == [("ANDROID", "VCMI-Android-arm64-v8a.apk"), ("PC", "HOMM3 complete gog")]
+
+    def test_platform_named_subfolders_are_one_game(self, tmp_path):
+        import zipfile
+
+        game = tmp_path / "Garten Of Banban"
+        _files(game / "Mobile", "Garten of Banban.apk")
+        pc_zip = game / "PC" / "Steam release" / "Garten Of Banban.zip"
+        pc_zip.parent.mkdir(parents=True)
+        with zipfile.ZipFile(pc_zip, "w") as zf:
+            zf.writestr("Garten of Banban.exe", b"x")
+        results = sorted((r.platform, r.cleaned_name) for r in _scan(tmp_path))
+        assert results == [("ANDROID", "Garten Of Banban"), ("PC", "Garten Of Banban")]
+
+    def test_rom_folder_platform(self, tmp_path):
+        _files(tmp_path / "Chrono Trigger", "Chrono Trigger (USA).sfc")
+        results = _scan(tmp_path)
+        assert [(r.cleaned_name, r.platform) for r in results] == [("Chrono Trigger", "SNES")]
+
+    def test_console_path_for_unknown_archive(self, tmp_path):
+        _files(tmp_path / "EMU Redump", "Super Mario Sunshine.7z")
+        results = _scan(tmp_path)
+        assert [(r.cleaned_name, r.platform) for r in results] == [("Super Mario Sunshine", "CONSOLE")]
+
+    def test_system_folder_names_platform(self, tmp_path):
+        _files(tmp_path / "PS2", "God of War.7z", "Shadow of the Colossus.7z")
+        assert {r.platform for r in _scan(tmp_path)} == {"PS2"}
+
+    def test_disc_header_identifies_console(self, tmp_path):
+        folder = tmp_path / "Zelda Wind Waker"
+        folder.mkdir()
+        gc = bytearray(0x400)
+        gc[0x1C:0x20] = b"\xc2\x33\x9f\x3d"
+        (folder / "Zelda Wind Waker (USA).iso").write_bytes(bytes(gc))
+        assert [r.platform for r in _scan(tmp_path)] == ["GAMECUBE"]
+
+    def test_android_only_folder(self, tmp_path):
+        _files(tmp_path / "Mobile Games", "Unreal-Android.1.2.0.apk")
+        assert [(r.cleaned_name, r.platform) for r in _scan(tmp_path)] == [("Unreal", "ANDROID")]
+
+    def test_pc_repack_in_console_named_folder_stays_pc(self, tmp_path):
+        _repack(tmp_path / "Xbox Games" / f"Halo [{TAG.title()} Repack]")
+        assert [r.platform for r in _scan(tmp_path)] == ["PC"]
+
+
+class TestNameCleanupFromDrive:
+    def test_scene_tag_in_middle_is_kept(self):
+        word = TAG2.title()
+        assert clean_folder_name(f"Vampire the {word} - Bloodlines - GOG") == (
+            f"Vampire the {word} Bloodlines"
+        )
+
+    def test_trailing_scene_tag_and_by_removed(self):
+        assert clean_folder_name(f"How to Fish by {TAG.title()}") == "How to Fish"
+
+    def test_site_suffix_and_id_removed(self):
+        assert _clean_archive_name("Poopy's.Playland-GameSite.com.rar") == "Poopy's Playland"
+        assert _clean_archive_name("Scarlet Skips.25093186.zip") == "Scarlet Skips"
+
+    def test_all_dlcs_suffix(self):
+        assert _clean_archive_name("Ultra.Street.Fighter.IV.v1.09.ALL.DLCs.zip") == "Ultra Street Fighter IV"
+
+    def test_hyphen_joined_words(self):
+        assert _clean_archive_name("Star-Wars-Yoda-Stories_Win_EN_Easy-Setup.zip") == "Star Wars Yoda Stories"
+
+    def test_engine_names_are_valid_titles(self):
+        assert _clean_archive_name("Unreal (Europe).iso") == "Unreal"
+
+    def test_system_prefix_and_repo_suffix(self):
+        assert _clean_archive_name("N64 Ship of Harkinian - Zelda Ocarina Of Time.7z") == (
+            "Ship of Harkinian Zelda Ocarina Of Time"
+        )
+        assert _clean_archive_name("PS1 Tekken3 Remake-master.7z") == "Tekken3 Remake"
+
+    def test_machine_folder_versions(self):
+        assert clean_folder_name("Gauntlet_1.0(b)_(14890)_win_gog") == "Gauntlet"
+        assert clean_folder_name("grim_dawn_1.3.1.1_b_(94495)_win_gog") == "grim dawn"
+        assert clean_folder_name("incision_84588") == "incision"
+        assert clean_folder_name("Mark_of_the_Ninja_Remastered_1.0 rc1_(42657)_win_gog") == (
+            "Mark of the Ninja Remastered"
+        )
+
+    def test_ampersand_becomes_and(self):
+        assert clean_folder_name("Heroes Of Might & Magic 4") == "Heroes Of Might and Magic 4"
+
+    def test_gog_setup_polish(self):
+        cases = {
+            "setup_hexen_ii_1.11_music_fix_(45370).exe": "Hexen II",
+            "setup_mortal_kombat2_2.0.0.2.exe": "Mortal Kombat 2",
+            "setup_star_warstm_episode_i_-_racertm_1.0_hotfix3_(20791).exe": "Star Wars Episode I Racer",
+            "setup_hollow_knight_1.5.78.11833_(64bit)_(50885).exe": "Hollow Knight",
+            "setup_slime_rancher_1.4.4-win_(64bit)_(51882).exe": "Slime Rancher",
+            "setup_metal_slug_2_gog-3_(12272).exe": "Metal Slug 2",
+            "setup_ninja_gaiden_ragebound_-cs37895_(64bit)_(85863).exe": "Ninja Gaiden Ragebound",
+            "setup_epic_pinball_the_complete_collection_1.01_gog_v2_(86528).exe": (
+                "Epic Pinball The Complete Collection"
+            ),
+            "setup_oceanhorn_-_monster_of_uncharted_seas_update_2018-02-06_(18420).exe": (
+                "Oceanhorn Monster Of Uncharted Seas"
+            ),
+        }
+        for filename, expected in cases.items():
+            assert _clean_gog_setup_name(filename) == expected, filename
+
+    def test_linux_installer_language_cut(self):
+        from playcache.folder_scanner import _clean_generic_sh_name
+
+        assert _clean_generic_sh_name("steamworld_dig_2_en_1_1_15062.sh") == "Steamworld Dig 2"
+        assert _clean_generic_sh_name("wonder_boy_the_dragon_s_trap_en_1_03f_02_20817.sh") == (
+            "Wonder Boy The Dragon's Trap"
+        )

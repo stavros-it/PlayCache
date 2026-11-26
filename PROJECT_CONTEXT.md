@@ -31,7 +31,8 @@ produced in collaboration with AI assistants and reviewed by the author.
    (e.g. `RAWG: 42 calls`) in the status bar after the first API call.
 4. Browse the sortable/filterable games table — columns auto-fit to content
    (Excel-style); select multiple rows with Ctrl/Shift. Filter the view with
-   the left panel: Search (name substring), Store (data-driven), Status, and
+   the left panel: Search (name substring), Store (data-driven), Platform
+   (data-driven: PC, PC (Linux), SWITCH, PS2, ANDROID, ...), Status, and
    Genre (every genre found in the Type column; a game with joined genres
    like "Action / RPG" matches both). The table uses a
    **dark slate theme** with subtle zebra striping and an indigo selection
@@ -42,7 +43,8 @@ produced in collaboration with AI assistants and reviewed by the author.
    games, Delete N games). Click a row to see cover image + full metadata in
    the detail panel. Edit fields inline — edits persist as *manual overrides*
    that survive rescans. Click **Find Duplicates…** (Ctrl+D) to fuzzy-match
-   similar games and bulk-remove the redundant copies.
+   similar games on the same platform and bulk-remove the redundant copies
+   (copies on different platforms are never offered as duplicates).
 5. Click **Stats** for a polished overview: metric cards (total, with metadata,
    with cover art, with release date, with ESRB, with Metacritic, manually
    edited) and bar charts (by status, source, platform, store, ESRB, disk,
@@ -76,7 +78,7 @@ produced in collaboration with AI assistants and reviewed by the author.
 | Fuzzy matching | stdlib `difflib.SequenceMatcher` | No extra deps |
 | Image loading | `QNetworkAccessManager` | Async, non-blocking, disk-cached |
 | Icon generation | `QPainter` + `Pillow` | Multi-resolution `.ico` (16–256px) |
-| Testing | `pytest` | 385 tests, all use mocked API responses (no network) |
+| Testing | `pytest` | 496 tests, all use mocked API responses (no network) |
 | Linting | `ruff` | All source + tests are ruff-clean |
 
 ### Runtime dependencies (`requirements.txt`)
@@ -104,12 +106,15 @@ PlayCache/
 │   ├── make_icon.py           # Regenerate app icon (.png + .ico)
 │   └── make_shortcut.py       # Create Windows desktop shortcut
 ├── playcache/                  # The library (importable package)
-│   ├── __init__.py             # version = "1.8.0"
+│   ├── __init__.py             # version = "1.9.0"
 │   ├── models.py              # GameRecord dataclass + computed disk/release props
 │   ├── config.py              # Config loader: ini + env vars
 │   ├── db.py                  # SQLite schema, upsert, overrides, stats
-│   ├── folder_scanner.py      # smart game-name detection from folders/files/metadata;
-│   │                          # game archives (.zip/.7z/.rar/.iso) as game entries
+│   ├── folder_scanner.py      # folder classification (container / game / grouping /
+│   │                          # no evidence), smart name detection, loose archives,
+│   │                          # installers, dumps and APKs as entries, same-platform dedupe
+│   ├── platforms.py           # PC vs console vs Android: path hints, ROM/APK
+│   │                          # extensions, disc-header sniffing, zip member peeking
 │   ├── textutils.py           # HTML strip, truncate, ratings, fuzzy match
 │   ├── rawg_client.py         # RAWG API client — primary source
 │   ├── thegamesdb_client.py   # TheGamesDB fallback client; genres/devs/pubs/boxart/quota
@@ -136,7 +141,9 @@ PlayCache/
 └── tests/                     # pytest suite
     ├── conftest.py                   # QT_QPA_PLATFORM=offscreen + session qapp fixture + autouse fixture that closes/deletes top-level widgets after every test
     ├── test_textutils.py             # 44 tests (colon rule, scrub_query, ratings, truncate)
-    ├── test_folder_scanner.py        # 146 tests (smart detection + archives + installers + grouping descent + Switch dumps)
+    ├── test_folder_scanner.py        # 185 tests (smart detection, archives, installers, category folders, dedupe, platform variants)
+    ├── test_platforms.py             # 60 tests (path hints, extensions, disc headers, zip peeking, combine/resolve)
+    ├── test_platform_duplicates.py   # 12 tests (platform-aware purge / Find Duplicates / conflicts / TGDB, Platform filter)
     ├── test_db.py                    # 21 tests (upsert_many atomicity + NOCASE view + int coercion)
     ├── test_cataloger_integration.py # 5 end-to-end tests (mocked APIs + merge)
     ├── test_cataloger_behavior.py    # 10 tests (cancel sentinel, only_missing, provider, rescan seeding)
@@ -159,7 +166,7 @@ PlayCache/
     └── test_image_cache.py           # 6 tests (scheme rejection, cache robustness)
 ```
 
-**Total**: ~7,215 LOC source + ~5,560 LOC tests = ~12,775 LOC (plus `run.pyw` / `run.py`).
+**Total**: ~8,135 LOC source + ~6,290 LOC tests = ~14,425 LOC (plus `run.pyw` / `run.py`).
 
 ## 4. Architecture at a glance
 
@@ -207,14 +214,42 @@ PlayCache/
 ```
 
 ### Data flow
-1. **Scan** (`FolderScanner`): walks the drive, skips Windows system folders,
-   descends library containers (`steamapps/common`, `GOG Games`, `Epic Games`),
-   and **smart-detects the game name** via authoritative metadata first, then
-   evidence scoring over every remaining signal:
+1. **Scan** (`scan_games`): walks the drive, skips Windows/Linux system
+   folders, descends library containers (`steamapps/common`, `GOG Games`,
+   `Epic Games`) and classifies every other folder (`_classify`):
+   * **game** - a real game binary / GOG or Steam metadata at the top; or a
+     downloaded package (repack parts, bare `setup.exe`, scene `.nfo`+ISO,
+     cue/bin, one multi-part set); or loose files that all belong to the
+     folder's title (one GOG product incl. DLC/goodies, `Red Alert 2.7z` +
+     `Red Alert II Portable.zip`); or install-step subfolders sharing one GOG
+     build ID (`1-Install Base/`, `3-Ann Upd/`);
+   * **grouping** - holds at least one subfolder with game evidence under a
+     different title (`000Kidz/`, `1-FPS/`, `1-PORTS/` with a single game),
+     or loose files for several products (`Steamworld/` with three
+     installers, `Metal Slug/` with numbered sequels): descended, and its
+     loose archives/installers/dumps/APKs become entries one by one;
+   * **skip** - no game evidence within 3 levels (empty folders, music,
+     documents). Extras folders (`DLC`, `Bonus`, `MD5`, `Crack`, `Redist`,
+     `Patch`, `Soundtrack`, ...), content folders (`bin`, `Engine`,
+     `*_Data`, `Disc 1`) and platform-named folders (`PC`, `Mobile`,
+     `Steam release`) are always part of their parent game.
+   Each entry gets a **platform** (`platforms.py`): file content first
+   (ROM/APK extensions, GameCube/Wii/Saturn/Dreamcast/Xbox headers, ISO9660
+   system IDs incl. PS1/PS2/PSP/PS3, zip member lists), then the nearest
+   folder name that names a system (`PS2`, `Nintendo GameCube`, `[Switch]`,
+   `1-Linux Games`, `1-PORTS`, `EMU Redump` -> `CONSOLE`), else `PC`. Strong
+   PC content (executables, repack parts) beats a console folder name. A
+   game folder that also holds a build for another platform (GOG Linux
+   `.sh` next to a Windows installer, an `.apk`, a console dump) yields one
+   extra entry per platform (`_variant_entries`). Finally **dedupe**
+   (`dedupe_games`) collapses entries with the same title key on the same
+   platform: installed folder > game folder > loose installer > archive/dump
+   > variant, then known store, then shorter path. Different platforms are
+   always kept. Names are **smart-detected** via authoritative metadata
+   first, then evidence scoring over every remaining signal:
    1. Steam `appmanifest_*.acf` manifest (matched by `installdir`)
    2. GOG `goggame-*.info` JSON metadata
-   3. GOG setup executable filename (`setup_achilles_legends_untold_1.4.0.0_(74603).exe` → `Achilles Legends Untold`)
-   4. **Evidence scoring** (`_best_name_from_evidence`): candidates are
+   3. **Evidence scoring** (`_best_name_from_evidence`): candidates are
       collected from installer filenames (`Hollow Knight-Setup.exe`,
       `doom_eternal_installer.exe`, `DoomEternalSetup.exe` — source-group
       tags stripped), PE VERSIONINFO
@@ -225,9 +260,13 @@ PlayCache/
       folder name itself is junk). Each candidate scores
       `weight × title-quality` (+0.10 when two sources agree); executables
       are searched one subfolder level deeper when the top level is empty
-      (multi-disc layouts). Weights: installer 0.90, PE product 0.75,
-      PE description 0.70, folder 0.60, stem 0.55, parent 0.40.
-   5. **Game archives** (`.zip`/`.7z`/`.rar`/`.iso`) are catalogued as games
+      (multi-disc layouts). Weights: installer 0.90, folder name typed by
+      a person 0.88 (machine-style `name_with_underscores` 0.60), main GOG
+      `setup_*` installer 0.85 (largest installer set, patch/DLC installers
+      ignored), PE product 0.75, PE description 0.70, stem 0.55, parent
+      0.40. A near-identical candidate with better spelling or spacing
+      replaces the winner (`Soulreaver` -> `Soul Reaver`, typo fixes).
+   4. **Game archives** (`.zip`/`.7z`/`.rar`/`.iso`) are catalogued as games
       in their own right: the title is parsed from the archive filename
       (`Hollow.Knight.v1.0.231.32-bit.(48932).zip` → `Hollow Knight`), with
       URL prefixes (`downloads.example.com-…`), source-group tags (kept
@@ -245,11 +284,11 @@ PlayCache/
       Disc-dump region/revision tags — `(USA)`, `(Europe)`, `(Rev 2)`,
       `(En,Fr,De,Es,It)` — are stripped from folder and archive names.
    Then detects store + platform. If a game is found that already exists in the
-   DB on a **different disk**, a conflict handler prompts the user to choose
-   which copy to keep (new / old / both).
+   DB on a **different disk** with the **same platform**, a conflict handler
+   prompts the user to choose which copy to keep (new / old / both).
    After the scan dialog closes, `MainWindow` runs
    `Database.purge_exact_duplicates()` — rows sharing an exact
-   (case-insensitive) `game_name` are removed, keeping the most complete
+   (case-insensitive) `game_name` and platform are removed, keeping the most complete
    copy (fetch_status ok → most populated fields incl. manual overrides →
    newest `updated_at`); never removes every copy of a game.
 2. **Fetch** (`Cataloger._fetch`): tries RAWG first; on no-confident-match
@@ -370,8 +409,16 @@ Key settings: `db_path`, `request_delay` (0.3s), `request_timeout` (20s),
   `__version__`. The release workflow stamps the version from the git tag
   during the build (doesn't commit it).
 - **Lint**: `ruff check playcache/ tests/ run.py run.pyw` must pass.
-- **Tests**: `python -m pytest tests/ -q` must pass (currently 379 passing,
+- **Tests**: `python -m pytest tests/ -q` must pass (currently 495 passing,
   1 platform-gated skip on Windows for a Linux-only `.sh` installer test).
+- **Platform labels** live in `playcache/platforms.py` (`ALL_PLATFORMS`).
+  PC variants keep the reference-sheet spelling (`PC`, `PC (Linux)`,
+  `PC (Fan Port)`, `PC (Mod)`); consoles are upper-case short names
+  (`SWITCH`, `PS2`, `GAMECUBE`, ...); `CONSOLE` means "a console, system
+  unknown". Use the constants, not string literals, in new code.
+- **Scanner fixtures need game files** — the scanner never catalogues a
+  folder without game evidence, so tests create at least one file
+  (`game.exe`, an installer, an archive) in every fixture game folder.
 - **No emojis** in source, docs, or UI strings unless explicitly requested.
 - **No `print()` in library code** — use `logging` (`log = logging.getLogger(__name__)`).
   `run.pyw` redirects stdout/stderr to `playcache.log`; `run.py` (console entry)
@@ -428,13 +475,32 @@ git push --tags
 
 ## 9. Known limitations & gotchas
 
-- **Switch dump platform detection** — `_make_scanned` in `folder_scanner.py`
-  sets `platform="SWITCH"` when `has_switch_dump()` finds a `.nsp`, `.nsz`,
-  `.xci` or `.xcz` file in the game folder or up to 2 subfolder levels below
-  it. This overrides path-based hints (`PC (Linux)`, `PC (Mod)`). Archive and
-  loose-installer entries still use `detect_platform` only. Loose dump files
-  outside a game folder do not become entries.
-- **Grouping-folder descent + loose installers (2026-09-08, v1.6.0)** — real
+- **Platform detection (2026-11-26, v1.9.0)** — `platforms.py` decides PC
+  vs console vs Android per entry. Content verdicts come from extensions
+  (`.nsp`/`.xci` -> `SWITCH`, `.sfc` -> `SNES`, `.apk` -> `ANDROID`, `.chd` ->
+  `CONSOLE`, ...), disc headers read from the first ~40 KB (plus a few
+  seeks for Xbox and PS2 `SYSTEM.CNF`), and zip member names (no
+  extraction). `.7z`/`.rar` contents are never read, so their platform comes
+  from folder names only; an unreadable or empty archive counts as weak PC.
+  Path hints use **every** folder in the absolute path, including folders
+  above the scan root - a parent named `Linux`, `PS2` or `EMU` affects all
+  games below it (nearest folder wins). Console words are matched as whole
+  folder names (`PS2`, `PS2 Games`, `Sony PlayStation 2`, `[PS2]`), so game
+  titles like `Wii Sports Club` are not hints. Generic ISO9660 images
+  without a console signature are treated as PC. TheGamesDB no longer
+  overwrites a scanner platform; it only refines empty or `CONSOLE`.
+- **Folder evidence is required (2026-11-26, v1.9.0)** — folders with no
+  executable, installer, repack part, archive, disc image, ROM or APK within
+  3 levels are skipped. An installed game whose only binaries sit deeper
+  than 3 levels would be missed (none seen in practice).
+- **Dedupe is title-key based** — `_title_key` ignores case, accents,
+  punctuation, spacing, leading/trailing articles, Roman numerals
+  (`II` == `2`) and edition words (`Complete/GOTY/Deluxe/Definitive ...
+  Edition`); `Enhanced`, `Remastered` and `Special` editions stay distinct.
+  Two different games whose keys collide on one platform keep only one
+  entry; `scan_games(..., dedupe=False)` returns every entry.
+- **Grouping-folder descent + loose installers (2026-09-08, v1.6.0;
+  superseded by `_classify` in v1.9.0)** — real
   libraries organize games into genre buckets (`1-ARCADE/`, `1-RPG/`, …) that
   mix game subfolders with loose `setup_*.exe` / `gog_*.sh` download files.
   The scanner now:
@@ -555,11 +621,14 @@ git push --tags
   the feature silently dead). Tests monkeypatch `_read_pe_metadata` so CI
   (Linux) never touches the ctypes path.
 - **Post-scan purge is exact-name only** — `purge_exact_duplicates()` groups
-  by `lower(game_name)` and never touches fuzzy lookalikes ("Doom" vs
-  "Doom Eternal" stay). Fuzzy duplicates remain manual (Find Duplicates…).
-- **Archive detection is filename-only** — `.zip`/`.7z`/`.rar`/`.iso` files
-  are catalogued as games from their filename alone (nothing is extracted or
-  opened). Junk stems (readme/data/saves/…) are filtered by
+  by `lower(game_name)` + platform (empty platform = `PC`) and never touches
+  fuzzy lookalikes ("Doom" vs "Doom Eternal" stay) or other-platform copies.
+  Fuzzy duplicates remain manual (Find Duplicates…, same platform only).
+- **Archive titles are filename-only** — `.zip`/`.7z`/`.rar`/`.iso`/`.tar*`
+  files are catalogued as games from their filename alone (only zip member
+  names and disc headers are read, for the platform). Manuals, soundtracks,
+  artbooks, avatars, wallpapers, cracks, patches and saves are never
+  entries (`_EXTRAS_FILE_TOKENS`). Junk stems (readme/data/saves/…) are filtered by
   `_ARCHIVE_JUNK_NAMES` in `folder_scanner.py`; an archive whose parsed name
   is empty is skipped silently. When a folder holds archives and no game
   executables, resolution follows three rules: archive-name ≈ folder-name
@@ -575,9 +644,9 @@ git push --tags
   `folder_scanner.py` merges the encoded `SOURCE_TAGS` set (stored
   base64-encoded so the repository does not advertise download-source
   names). A new tag that slips through is fixed by adding one token to the
-  encoded blob. Caveat: tokens are stripped as standalone words, so a
-  hypothetical game *named* one of these ("Wow", "Rune") would lose that
-  word from its search query — the manual-override flow covers it.
+  encoded blob. Since v1.9.0 a standalone tag word is stripped only at the
+  end of a name (or when hyphen-attached / bracketed), so a title that
+  contains such a word in the middle keeps it.
 - **Installer name cleaning strips hyphens** — installer filenames are
   treated as search queries: `half-life-setup.exe` → `Half Life` (hyphen
   dropped). The API fuzzy match tolerates this; don't reuse

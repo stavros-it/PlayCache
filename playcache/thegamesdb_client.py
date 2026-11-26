@@ -327,7 +327,7 @@ class TheGamesDBClient:
         plat_map = plat_include.get("data") or plat_include
         plat_id = game.get("platform")
         plat_name = (plat_map.get(str(plat_id)) or {}).get("name", "") if plat_id else ""
-        if plat_name:
+        if plat_name and (record.platform or "").strip() in ("", "CONSOLE"):
             record.platform = self._platform_label(plat_name)
 
         if not record.store:

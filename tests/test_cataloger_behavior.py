@@ -110,7 +110,9 @@ def _cancel_progress(idx: int, total: int, record, message: str) -> None:
 def test_cancel_mid_scan_propagates_without_error_row(tmp_path):
     _cfg, db, cat = _make_cataloger(tmp_path, RecordingRAWG, UnavailableTGDB)
     (tmp_path / "Hollow Knight").mkdir()
+    ((tmp_path / "Hollow Knight") / "game.exe").write_bytes(b"x")
     (tmp_path / "Deep Rock Galactic").mkdir()
+    ((tmp_path / "Deep Rock Galactic") / "game.exe").write_bytes(b"x")
 
     with pytest.raises(InterruptedError):
         cat.scan_to_db(str(tmp_path), progress=_cancel_progress)
@@ -124,6 +126,7 @@ def test_cancel_mid_scan_propagates_without_error_row(tmp_path):
 def test_cancelled_dry_run_writes_nothing(tmp_path):
     _cfg, db, cat = _make_cataloger(tmp_path, RecordingRAWG, UnavailableTGDB)
     (tmp_path / "Hollow Knight").mkdir()
+    ((tmp_path / "Hollow Knight") / "game.exe").write_bytes(b"x")
 
     with pytest.raises(InterruptedError):
         cat.scan_to_db(str(tmp_path), dry_run=True, progress=_cancel_progress)
@@ -135,6 +138,7 @@ def test_cancel_on_already_catalogued_skip_keeps_row_ok(tmp_path):
     _cfg, db, cat = _make_cataloger(tmp_path, RecordingRAWG, UnavailableTGDB)
     game_dir = tmp_path / "Hollow Knight"
     game_dir.mkdir()
+    (game_dir / "game.exe").write_bytes(b"x")
     path = str(game_dir.resolve())
     db.upsert(
         GameRecord(
@@ -159,7 +163,9 @@ def test_cancel_on_already_catalogued_skip_keeps_row_ok(tmp_path):
 # --------------------------------------------------------------------- #
 def _two_catalogued_games(db: Database, tmp_path) -> tuple[str, str]:
     (tmp_path / "Hollow Knight").mkdir()
+    ((tmp_path / "Hollow Knight") / "game.exe").write_bytes(b"x")
     (tmp_path / "Deep Rock Galactic").mkdir()
+    ((tmp_path / "Deep Rock Galactic") / "game.exe").write_bytes(b"x")
     hk_path = str((tmp_path / "Hollow Knight").resolve())
     drg_path = str((tmp_path / "Deep Rock Galactic").resolve())
     for name, path in (("Hollow Knight", hk_path), ("Deep Rock Galactic", drg_path)):
@@ -239,6 +245,7 @@ def test_rescan_fetches_by_stored_id_and_passes_overrides(tmp_path):
     rawg = cat.rawg
     game_dir = tmp_path / "Hollow Knight"
     game_dir.mkdir()
+    (game_dir / "game.exe").write_bytes(b"x")
     path = str(game_dir.resolve())
     db.upsert(
         GameRecord(
@@ -268,6 +275,7 @@ def test_rescan_without_ids_searches_by_stored_name_not_folder_name(tmp_path):
     rawg = cat.rawg
     game_dir = tmp_path / "Hollow Knight Deluxe"
     game_dir.mkdir()
+    (game_dir / "game.exe").write_bytes(b"x")
     path = str(game_dir.resolve())
     db.upsert(
         GameRecord(
@@ -293,6 +301,7 @@ def test_fetch_exception_preserves_existing_row_metadata_and_overrides(tmp_path)
     _cfg, db, cat = _make_cataloger(tmp_path, ExplodingRAWG, UnavailableTGDB)
     game_dir = tmp_path / "Hollow Knight"
     game_dir.mkdir()
+    (game_dir / "game.exe").write_bytes(b"x")
     path = str(game_dir.resolve())
     db.upsert(
         GameRecord(

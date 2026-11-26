@@ -186,7 +186,11 @@ class Database:
 
 
     def purge_exact_duplicates(self) -> int:
-        """Delete rows sharing an exact (case-insensitive) game name.
+        """Delete rows sharing an exact (case-insensitive) game name and platform.
+
+        Copies of a game on different platforms (``PC`` vs ``PC (Linux)``
+        vs ``SWITCH``) are never treated as duplicates; an empty platform
+        counts as ``PC``.
 
         Keeps the most complete copy per name (fetch_status ok first, then
         most populated fields incl. manual overrides, then newest updated_at)
@@ -204,11 +208,12 @@ class Database:
             rows = [dict(r) for r in conn.execute(
                 f"SELECT {', '.join(fields)} FROM games;"
             ).fetchall()]
-            groups: dict[str, list[dict]] = {}
+            groups: dict[tuple[str, str], list[dict]] = {}
             for row in rows:
                 name = (row["game_name"] or "").strip().lower()
                 if name:
-                    groups.setdefault(name, []).append(row)
+                    platform = (row["platform"] or "PC").strip().lower()
+                    groups.setdefault((name, platform), []).append(row)
             to_delete: list[str] = []
             for members in groups.values():
                 if len(members) < 2:

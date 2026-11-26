@@ -150,7 +150,9 @@ class NotFoundTGDBClient(FakeTGDBClient):
 def _make_tree(tmp_path: Path):
     tag = sorted(t for t in SOURCE_TAGS if t.isalpha())[0]
     (tmp_path / "Hollow Knight").mkdir()
+    ((tmp_path / "Hollow Knight") / "game.exe").write_bytes(b"x")
     (tmp_path / f"Deep Rock Galactic [{tag.title()}]").mkdir()
+    ((tmp_path / f"Deep Rock Galactic [{tag.title()}]") / "game.exe").write_bytes(b"x")
 
 
 def test_pipeline_rawg_fetch_and_store(tmp_path):
